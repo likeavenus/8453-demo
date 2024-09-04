@@ -7,4 +7,5 @@ import gltf from "vite-plugin-gltf";
 export default defineConfig({
   plugins: [react(), glsl(), gltf()],
   assetsInclude: ["**/*.mp3", "**/*.gltf"],
+  base: "/",
 });
