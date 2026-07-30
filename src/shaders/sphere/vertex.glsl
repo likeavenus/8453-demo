@@ -2,6 +2,7 @@
 uniform float uTime;
 
 uniform float uAudioFrequency;
+uniform float uBeat;
 varying float vPattern;
 varying vec2 vUv;
 
@@ -27,7 +28,8 @@ return pow(x, 5.0);
 float gavoronoi3(in vec2 p)
 {    
     float time = uTime;
-    float timeAdd = mix(1.0, 3.0, EaseInQuint(uAudioFrequency));
+    float reaction = clamp(uAudioFrequency + uBeat * 0.75, 0.0, 1.0);
+    float timeAdd = mix(1.0, 3.0, EaseInQuint(reaction));
 
     time += timeAdd;
 
@@ -79,7 +81,9 @@ void main () {
     vec3 light = normalize(vec3(3., 2., -1.));
 	float r = dot(nor(uv), light);
 
-    float displacement =  clamp(1.0 - r, 0.0, 0.2) + uAudioFrequency / 2.0;
+    float displacement = clamp(1.0 - r, 0.0, 0.2)
+        + uAudioFrequency * 0.24
+        + uBeat * 0.3;
     vec3 newPosition = position + normal * displacement;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1);
 

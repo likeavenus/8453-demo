@@ -1,111 +1,104 @@
-import {
-  Box,
-  Center,
-  DragControls,
-  OrbitControls,
-  Plane,
-  useMatcapTexture,
-} from "@react-three/drei";
-import { Perf } from "r3f-perf";
-import { Text3D } from "@react-three/drei";
-import * as THREE from "three";
-import { useEffect, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
-import { RigidBody } from "@react-three/rapier";
-import { useControls } from "leva";
-import { slideAtom } from "./Overlay/Overlay";
+import { Center, Text3D } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useRef } from "react";
 
-import { CameraHandler } from "./CameraHandler/CameraHandler";
+const FONT_URL = `${import.meta.env.BASE_URL}fonts/Roboto_Bold.json`;
 
-const torusGeometry = new THREE.TorusGeometry(1, 0.6, 16, 32);
-const material = new THREE.MeshMatcapMaterial();
+const digits = [
+  { value: "8", position: [-1.2, 3.35, 0.05], color: "#22c8ff" },
+  { value: "4", position: [-0.4, 3.62, 0], color: "#9b65ff" },
+  { value: "5", position: [0.4, 3.62, 0], color: "#ff3b83" },
+  { value: "3", position: [1.2, 3.35, 0.05], color: "#ff7755" },
+];
 
-export const Experience = () => {
-  const donuts = useRef([]);
-  const [matCapTexture] = useMatcapTexture("1B1B1B_515151_7E7E7E_6C6C6C", 256);
+const smoothstep = (value) => value * value * (3 - 2 * value);
 
-  useEffect(() => {
-    matCapTexture.encoding = THREE.sRGBEncoding;
-    matCapTexture.needsUpdate = true;
+export const Experience = ({ audioBus, introStarted }) => {
+  const camera = useThree((state) => state.camera);
+  const groups = useRef([]);
+  const materials = useRef([]);
+  const introStartedAt = useRef(null);
 
-    material.matcap = matCapTexture;
-    material.needsUpdate = true;
-  }, []);
+  useFrame((state) => {
+    if (introStarted && introStartedAt.current === null) {
+      introStartedAt.current = state.clock.elapsedTime;
+    }
 
-  // useFrame((state, delta) => {
-  // for (const donut of donuts.current) {
-  //   donut.rotation.y += delta * 0.1;
-  // }
-  // });
+    const introAge =
+      introStartedAt.current === null
+        ? 0
+        : state.clock.elapsedTime - introStartedAt.current;
 
-  // const { slideDistance } = useControls({
-  //   slideDistance: {
-  //     value: 1,
-  //     min: 0,
-  //     max: 10,
-  //   },
-  // });
+    groups.current.forEach((group, index) => {
+      if (!group) return;
 
-  return (
-    <>
-      {/* <CameraHandler slideDistance={slideDistance} /> */}
-      <RigidBody restitution={1}>
+      const digit = digits[index];
+      const revealProgress = Math.min(
+        Math.max((introAge - index * 0.11) / 0.72, 0),
+        1
+      );
+      const reveal = smoothstep(revealProgress);
+      const direction = index % 2 === 0 ? 1 : -1;
+      const float = Math.sin(state.clock.elapsedTime * 0.78 + index * 0.9) * 0.045;
+      const kickLift = audioBus.kick * (0.1 + index * 0.012);
+      const scale =
+        0.68 * reveal * (1 + audioBus.kick * 0.12 + audioBus.body * 0.025);
+
+      group.position.set(
+        digit.position[0],
+        digit.position[1] - (1 - reveal) * 0.22 + float + kickLift,
+        digit.position[2]
+      );
+      group.quaternion.copy(camera.quaternion);
+      group.rotateZ(
+        direction * 0.025 +
+          Math.sin(state.clock.elapsedTime * 0.52 + index) * 0.018 +
+          direction * audioBus.kick * 0.055
+      );
+      group.scale.setScalar(scale);
+
+      const material = materials.current[index];
+      if (material) {
+        material.opacity = reveal;
+        material.emissiveIntensity =
+          0.16 + audioBus.kick * 0.68 + audioBus.body * 0.12;
+      }
+    });
+  });
+
+  return digits.map((digit, index) => (
+    <group
+      key={digit.value}
+      ref={(group) => {
+        groups.current[index] = group;
+      }}
+      position={digit.position}
+      scale={0}
+    >
+      <Center>
         <Text3D
           castShadow
-          position={[-0.8, 1, 1]}
-          font="./fonts/Roboto_Bold.json"
+          font={FONT_URL}
+          bevelEnabled
+          bevelSize={0.025}
+          bevelThickness={0.035}
+          bevelSegments={3}
         >
-          8
-          <meshMatcapMaterial matcap={matCapTexture} />
+          {digit.value}
+          <meshStandardMaterial
+            ref={(material) => {
+              materials.current[index] = material;
+            }}
+            color={digit.color}
+            emissive={digit.color}
+            emissiveIntensity={0.16}
+            metalness={0.56}
+            roughness={0.26}
+            transparent
+            opacity={0}
+          />
         </Text3D>
-      </RigidBody>
-      <RigidBody restitution={1}>
-        <Text3D
-          castShadow
-          position={[0, 1.3, 2]}
-          font="./fonts/Roboto_Bold.json"
-        >
-          4
-          <meshMatcapMaterial matcap={matCapTexture} />
-        </Text3D>
-      </RigidBody>
-      <RigidBody restitution={1}>
-        <Text3D
-          castShadow
-          position={[0.8, 1.5, 2]}
-          font="./fonts/Roboto_Bold.json"
-        >
-          5
-          <meshMatcapMaterial matcap={matCapTexture} />
-        </Text3D>
-      </RigidBody>
-      <RigidBody restitution={1}>
-        <Text3D
-          castShadow
-          position={[1.6, 1.7, 2]}
-          font="./fonts/Roboto_Bold.json"
-        >
-          3
-          <meshMatcapMaterial matcap={matCapTexture} />
-        </Text3D>
-      </RigidBody>
-
-      {/* {[...Array(100)].map((value, index) => (
-        <mesh
-          ref={(element) => (donuts.current[index] = element)}
-          key={index}
-          position={[
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 10,
-          ]}
-          scale={0.2 + Math.random() * 0.2}
-          rotation={[Math.random() * Math.PI, Math.random() * Math.PI, 0]}
-        >
-          <torusGeometry />
-          <meshMatcapMaterial matcap={matCapTexture} />
-        </mesh>
-      ))} */}
-    </>
-  );
+      </Center>
+    </group>
+  ));
 };

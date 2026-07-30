@@ -1,4 +1,4 @@
-import React, { Suspense, useState } from "react";
+import React, { useEffect, useState } from "react";
 import * as THREE from "three";
 
 import { useGLTF } from "@react-three/drei";
@@ -6,7 +6,11 @@ import { useGLTF } from "@react-three/drei";
 import url from "/video/swag.mp4";
 import tv from "/models/tv.gltf";
 
-export const TV = () => {
+export const TV = ({
+  position = [-3.05, 0.12, -1.65],
+  rotation = [Math.PI / 14, Math.PI * 1.14, 0],
+  scale = 0.72,
+}) => {
   const { nodes } = useGLTF(tv);
 
   const [video] = useState(() => {
@@ -15,12 +19,23 @@ export const TV = () => {
     vid.crossOrigin = "Anonymous";
     vid.loop = true;
     vid.muted = true;
-    vid.play();
     return vid;
   });
 
+  useEffect(() => {
+    video.play().catch(() => {});
+
+    return () => {
+      video.pause();
+    };
+  }, [video]);
+
   return (
-    <group position={[-2, 0, 0]} rotation={[Math.PI / 8, Math.PI * 1.2, 0]}>
+    <group
+      position={position}
+      rotation={rotation}
+      scale={scale}
+    >
       <mesh geometry={nodes.TV.geometry}>
         <meshStandardMaterial color="white" />
       </mesh>

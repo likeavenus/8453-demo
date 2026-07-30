@@ -1,133 +1,414 @@
 import * as THREE from "three";
-import { useFrame } from "@react-three/fiber";
-import { Sphere } from "@react-three/drei";
-import React, { useRef, useEffect, useState, useMemo } from "react";
+import { Html, Sphere } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { analyzePercussionOnsets } from "../audio/beatAnalysis";
 import fragmentShader from "../shaders/sphere/fragment.glsl";
 import vertexShader from "../shaders/sphere/vertex.glsl";
 
-import track from "/music/track.mp3";
-import gsap from "gsap";
+const VISUAL_LEAD_SECONDS = 0.025;
+const trackCache = new Map();
 
-const WIREFRAME_DELTA = 0.015;
+const clamp01 = (value) => Math.min(Math.max(value, 0), 1);
 
-export class Visualizer {
-  constructor(mesh, frequencyUniformName) {
-    this.mesh = mesh;
-    this.frequencyUniformName = frequencyUniformName;
-    this.listener = new THREE.AudioListener();
-    this.mesh.add(this.listener);
-    this.mesh.material.uniforms[this.frequencyUniformName] = {
-      value: 0,
-    };
+const follow = (current, target, delta, attack, release) => {
+  const time = target > current ? attack : release;
+  return current + (target - current) * (1 - Math.exp(-delta / time));
+};
 
-    this.sound = new THREE.Audio(this.listener);
-    this.loader = new THREE.AudioLoader();
+const loadAndAnalyzeTrack = (path, context) => {
+  if (!trackCache.has(path)) {
+    const promise = new THREE.AudioLoader()
+      .loadAsync(path)
+      .then(async (buffer) => ({
+        buffer,
+        analysis: await analyzePercussionOnsets(buffer),
+      }))
+      .catch((error) => {
+        trackCache.delete(path);
+        throw error;
+      });
 
-    this.analyzer = new THREE.AudioAnalyser(this.sound, 256);
+    trackCache.set(path, promise);
+  }
+
+  return trackCache.get(path);
+};
+
+export const createAudioBus = () => ({
+  status: "idle",
+  isPlaying: false,
+  position: 0,
+  beat: 0,
+  impact: 0,
+  kick: 0,
+  clap: 0,
+  body: 0,
+  bass: 0,
+  mid: 0,
+  treble: 0,
+  beatCount: 0,
+  impactCount: 0,
+  kickHitCount: 0,
+  clapHitCount: 0,
+  bpm: null,
+  onsetCount: 0,
+  kickCount: 0,
+  clapCount: 0,
+});
+
+class MusicReactiveEngine {
+  constructor(listener, audioBus) {
+    this.audioBus = audioBus;
+    this.context = listener.context;
+    this.sound = new THREE.Audio(listener);
+    this.analyser = new THREE.AudioAnalyser(this.sound, 2048);
+    this.analyser.analyser.smoothingTimeConstant = 0.55;
+    this.analyser.analyser.minDecibels = -90;
+    this.analyser.analyser.maxDecibels = -18;
+    this.analysis = null;
+    this.onsetCursor = 0;
+    this.previousSyncPosition = -1;
+    this.lastComfortFlash = -Infinity;
+    this.disposed = false;
   }
 
   async load(path) {
-    this.loader.load(path, (buffer) => {
-      this.sound.setBuffer(buffer);
-      this.sound.setLoop(true);
-      //   this.sound.setVolume(0.5);
-      this.sound.play();
-    });
+    this.audioBus.status = "analyzing";
+    this.audioBus.isPlaying = false;
+    await this.context.resume();
+
+    const { buffer, analysis } = await loadAndAnalyzeTrack(path, this.context);
+    if (this.disposed) return null;
+
+    this.analysis = analysis;
+    this.audioBus.bpm = analysis.bpm;
+    this.audioBus.onsetCount = analysis.onsets.length;
+    this.audioBus.kickCount = analysis.kickCount;
+    this.audioBus.clapCount = analysis.clapCount;
+    this.sound.setBuffer(buffer);
+    this.sound.setLoop(true);
+    this.sound.setVolume(0.72);
+    this.audioBus.position = 0;
+    this.audioBus.status = "ready";
+
+    return analysis;
   }
 
-  getFrequency() {
-    return this.analyzer.getAverageFrequency();
+  async play() {
+    if (!this.sound.buffer || this.sound.isPlaying) return;
+
+    await this.context.resume();
+    if (this.disposed || this.sound.isPlaying) return;
+
+    this.sound.play();
+    this.audioBus.isPlaying = true;
+    this.audioBus.status = "playing";
   }
 
-  update() {
-    const freq = Math.max(this.getFrequency() - 100, 0) / 44;
-    this.mesh.material.uniforms[this.frequencyUniformName].value = freq;
+  pause() {
+    if (this.sound.isPlaying) this.sound.pause();
+    this.audioBus.position = this.getPlaybackPosition();
+    this.audioBus.isPlaying = false;
+    this.audioBus.status = this.analysis ? "paused" : "idle";
+  }
 
-    const freqUniform = this.mesh.material.uniforms[this.frequencyUniformName];
+  readBand(data, minimumHz, maximumHz) {
+    const binWidth = this.context.sampleRate / this.analyser.analyser.fftSize;
+    const firstBin = Math.max(0, Math.floor(minimumHz / binWidth));
+    const lastBin = Math.min(
+      data.length - 1,
+      Math.ceil(maximumHz / binWidth)
+    );
+    let sumSquares = 0;
 
-    gsap.to(freqUniform, {
-      duration: 1.5,
-      ease: "Slow.easeOut",
-      value: freq,
-    });
+    for (let bin = firstBin; bin <= lastBin; bin += 1) {
+      const normalized = data[bin] / 255;
+      sumSquares += normalized * normalized;
+    }
 
-    freqUniform.value = freq;
+    return Math.sqrt(sumSquares / Math.max(1, lastBin - firstBin + 1));
+  }
+
+  getPlaybackPosition() {
+    if (!this.sound.buffer) return 0;
+
+    const elapsed = this.sound.isPlaying
+      ? Math.max(this.context.currentTime - this.sound._startedAt, 0) *
+        this.sound.playbackRate
+      : 0;
+    const duration = this.sound.duration || this.sound.buffer.duration;
+    return (this.sound._progress + this.sound.offset + elapsed) % duration;
+  }
+
+  settle(delta) {
+    this.audioBus.bass = follow(this.audioBus.bass, 0, delta, 0.04, 0.18);
+    this.audioBus.mid = follow(this.audioBus.mid, 0, delta, 0.05, 0.2);
+    this.audioBus.treble = follow(this.audioBus.treble, 0, delta, 0.04, 0.16);
+    this.audioBus.beat *= Math.exp(-delta / 0.16);
+    this.audioBus.impact *= Math.exp(-delta / 0.14);
+    this.audioBus.kick *= Math.exp(-delta / 0.16);
+    this.audioBus.clap *= Math.exp(-delta / 0.12);
+    this.audioBus.body *= Math.exp(-delta / 0.3);
+  }
+
+  triggerOnsets(until, after = -1) {
+    const onsets = this.analysis?.onsets || [];
+
+    while (
+      this.onsetCursor < onsets.length &&
+      onsets[this.onsetCursor].time <= until
+    ) {
+      const onset = onsets[this.onsetCursor];
+
+      if (onset.time > after) {
+        this.audioBus.impact = Math.max(this.audioBus.impact, onset.strength);
+        this.audioBus.kick = Math.max(
+          this.audioBus.kick,
+          onset.type === "kick" || onset.type === "both" ? onset.strength : 0
+        );
+        this.audioBus.clap = Math.max(
+          this.audioBus.clap,
+          onset.type === "clap" || onset.type === "both" ? onset.strength : 0
+        );
+        if (onset.type === "kick" || onset.type === "both") {
+          this.audioBus.kickHitCount += 1;
+        }
+        if (onset.type === "clap" || onset.type === "both") {
+          this.audioBus.clapHitCount += 1;
+        }
+        this.audioBus.body = Math.max(
+          this.audioBus.body,
+          0.38 + onset.strength * 0.5
+        );
+        this.audioBus.impactCount += 1;
+
+        if (onset.time - this.lastComfortFlash >= 0.24) {
+          this.audioBus.beat = Math.max(
+            this.audioBus.beat,
+            0.34 + onset.strength * 0.36
+          );
+          this.audioBus.beatCount += 1;
+          this.lastComfortFlash = onset.time;
+        }
+      }
+
+      this.onsetCursor += 1;
+    }
+  }
+
+  update(delta) {
+    this.audioBus.position = this.getPlaybackPosition();
+    this.audioBus.isPlaying = Boolean(this.sound.isPlaying);
+
+    if (!this.analysis || !this.sound.isPlaying) {
+      this.settle(delta);
+      return;
+    }
+
+    const data = this.analyser.getFrequencyData();
+    const rawBass = this.readBand(data, 40, 180);
+    const rawMid = this.readBand(data, 180, 2200);
+    const rawTreble = this.readBand(data, 2200, 12000);
+    const bassTarget = clamp01(Math.pow(rawBass, 1.65));
+    const midTarget = clamp01(Math.pow(rawMid, 1.72));
+    const trebleTarget = clamp01(Math.pow(rawTreble, 1.62));
+
+    this.audioBus.bass = follow(
+      this.audioBus.bass,
+      bassTarget,
+      delta,
+      0.035,
+      0.2
+    );
+    this.audioBus.mid = follow(
+      this.audioBus.mid,
+      midTarget,
+      delta,
+      0.055,
+      0.26
+    );
+    this.audioBus.treble = follow(
+      this.audioBus.treble,
+      trebleTarget,
+      delta,
+      0.025,
+      0.14
+    );
+
+    this.audioBus.beat *= Math.exp(-delta / 0.2);
+    this.audioBus.impact *= Math.exp(-delta / 0.15);
+    this.audioBus.kick *= Math.exp(-delta / 0.18);
+    this.audioBus.clap *= Math.exp(-delta / 0.12);
+    this.audioBus.body *= Math.exp(-delta / 0.42);
+
+    const duration = this.analysis.duration;
+    const syncPosition = this.getPlaybackPosition() + VISUAL_LEAD_SECONDS;
+
+    if (syncPosition >= duration) {
+      this.triggerOnsets(duration, this.previousSyncPosition);
+      this.onsetCursor = 0;
+      this.lastComfortFlash = -Infinity;
+      this.triggerOnsets(syncPosition - duration, -1);
+      this.previousSyncPosition = syncPosition - duration;
+    } else if (syncPosition < this.previousSyncPosition) {
+      this.onsetCursor = 0;
+      this.lastComfortFlash = -Infinity;
+      this.triggerOnsets(syncPosition, -1);
+      this.previousSyncPosition = syncPosition;
+    } else {
+      this.triggerOnsets(syncPosition, this.previousSyncPosition);
+      this.previousSyncPosition = syncPosition;
+    }
+  }
+
+  dispose() {
+    this.disposed = true;
+
+    if (this.sound.isPlaying) this.sound.stop();
+    this.sound.disconnect();
+    this.analyser.analyser.disconnect();
+    this.audioBus.status = "idle";
+    this.audioBus.isPlaying = false;
+    this.audioBus.position = 0;
   }
 }
 
-export const AudioVisualizer = ({ path }) => {
-  const meshRef = useRef(null); // Ссылка на объект Three.js
-  const [visualizer, setVisualizer] = useState(null); // Состояние для Visualizer
+export const AudioVisualizer = ({
+  path,
+  audioBus,
+  onReady,
+  shouldPlay = true,
+}) => {
+  const camera = useThree((state) => state.camera);
+  const sphereRef = useRef(null);
+  const lightRef = useRef(null);
+  const engineRef = useRef(null);
+  const shouldPlayRef = useRef(shouldPlay);
+  const [status, setStatus] = useState("ANALYZING KICK + CLAP");
 
-  const uniforms = useMemo(() => {
-    return {
-      uTime: {
-        value: 0,
-      },
-      uAudioFrequency: {
-        value: 0.0,
-      },
-    };
-  }, []);
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uAudioFrequency: { value: 0 },
+      uBeat: { value: 0 },
+    }),
+    []
+  );
 
   useEffect(() => {
-    (async () => {
-      if (meshRef.current && !visualizer) {
-        const newVisualizer = new Visualizer(
-          meshRef.current,
-          "uAudioFrequency"
+    shouldPlayRef.current = shouldPlay;
+
+    const engine = engineRef.current;
+    if (!engine?.analysis) return;
+
+    if (shouldPlay) {
+      engine.play().catch((error) => {
+        console.error("Unable to resume music", error);
+        setStatus("AUDIO PLAYBACK FAILED");
+      });
+      setStatus("");
+    } else {
+      engine.pause();
+      setStatus("PAUSED · IDLE MODE");
+    }
+  }, [shouldPlay]);
+
+  useEffect(() => {
+    const listener = new THREE.AudioListener();
+    const engine = new MusicReactiveEngine(listener, audioBus);
+    let active = true;
+
+    camera.add(listener);
+    engineRef.current = engine;
+    audioBus.status = "analyzing";
+    audioBus.isPlaying = false;
+    window.__8453_AUDIO__ = audioBus;
+
+    engine
+      .load(path)
+      .then(async (analysis) => {
+        if (!active || !analysis) return;
+
+        if (shouldPlayRef.current) {
+          await engine.play();
+        } else {
+          engine.pause();
+        }
+        if (!active) return;
+
+        setStatus(
+          `${analysis.bpm ? `${analysis.bpm} BPM · ` : ""}${
+            analysis.kickCount
+          } KICKS · ${analysis.clapCount} CLAPS`
         );
+        onReady?.(analysis);
+        window.setTimeout(
+          () =>
+            active &&
+            setStatus(shouldPlayRef.current ? "" : "PAUSED · IDLE MODE"),
+          1600
+        );
+      })
+      .catch((error) => {
+        console.error("Unable to initialize music analysis", error);
+        if (active) {
+          setStatus("AUDIO ANALYSIS FAILED");
+          onReady?.(null);
+        }
+      });
 
-        await newVisualizer.load(path);
-        setVisualizer(newVisualizer);
-      }
-    })();
-  }, [meshRef.current]);
+    return () => {
+      active = false;
+      engine.dispose();
+      camera.remove(listener);
+      engineRef.current = null;
+      if (path.startsWith("blob:")) trackCache.delete(path);
+    };
+  }, [audioBus, camera, onReady, path]);
 
-  //   Обновляем визуализацию на каждом кадре
-  useFrame((state) => {
-    if (visualizer) {
-      visualizer.update();
+  useFrame((state, delta) => {
+    engineRef.current?.update(Math.min(delta, 0.1));
 
-      const time = state.clock.getElapsedTime();
+    uniforms.uTime.value = state.clock.getElapsedTime();
+    uniforms.uAudioFrequency.value =
+      audioBus.bass * 0.34 + audioBus.mid * 0.14;
+    uniforms.uBeat.value = Math.max(audioBus.impact, audioBus.body * 0.42);
 
-      meshRef.current.material.uniforms.uTime.value = time;
+    if (sphereRef.current) {
+      const scale =
+        0.7 * (1 + audioBus.body * 0.1 + audioBus.impact * 0.055);
+      sphereRef.current.scale.setScalar(scale);
+      sphereRef.current.rotation.y += delta * (0.08 + audioBus.treble * 0.12);
+    }
 
-      //   meshRef.current.position.x = Math.sin(time) + 1;
-      //   meshRef.current.position.z = Math.cos(time) + 1;
-
-      light.current.intensity =
-        meshRef.current.material.uniforms["uAudioFrequency"].value *
-        Math.floor(Math.random() * 15);
+    if (lightRef.current) {
+      lightRef.current.intensity =
+        3 + audioBus.bass * 7 + audioBus.body * 7 + audioBus.beat * 18;
     }
   });
 
-  const light = useRef();
-
   return (
-    <Sphere
-      scale={[0.7, 0.7, 0.7]}
-      ref={meshRef}
-      args={[1, 64, 64]}
-      position={[0, 2, 0]}
-    >
-      <pointLight castShadow intensity={15} ref={light} color="purple" />
-      <shaderMaterial
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-        uniforms={uniforms}
-      />
-      <lineSegments
-        ref={meshRef}
-        scale={[1 + WIREFRAME_DELTA, 1 + WIREFRAME_DELTA, 1 + WIREFRAME_DELTA]}
-      >
-        <sphereGeometry attach="geometry" />
+    <group>
+      {status && (
+        <Html center position={[0, 3.25, 0]}>
+          <div className="audio-status">{status}</div>
+        </Html>
+      )}
+      <Sphere ref={sphereRef} args={[1, 64, 64]} position={[0, 2, 0]}>
+        <pointLight
+          ref={lightRef}
+          castShadow
+          color="#bd5cff"
+          distance={9}
+          decay={2}
+        />
         <shaderMaterial
           vertexShader={vertexShader}
           fragmentShader={fragmentShader}
           uniforms={uniforms}
         />
-      </lineSegments>
-    </Sphere>
+      </Sphere>
+    </group>
   );
 };

@@ -2,6 +2,7 @@
 
 uniform float uTime;
 uniform float uAudioFrequency;
+uniform float uBeat;
 // varying vec2 vUv;
 varying float vPattern;
 
@@ -46,7 +47,7 @@ struct Color {
 
 void main() {
     vec3 color;
-    float time = uTime * (1.0 + uAudioFrequency);
+    float time = uTime * (1.0 + uAudioFrequency * 0.7 + uBeat * 1.5);
 
     // Color[3] colors = Color[](
     //     Color(vec3(0), 0.0),
@@ -54,14 +55,15 @@ void main() {
     //     Color(vec3(1), 1.0)
     // );
     // vec3 mainColor = vec3(0.1, 0.2, 0.9);
-    vec3 mainColor = mix(vec3(0.2, 0.3, 0.9), vec3(0.4, 1.0, 0.3), uAudioFrequency);
+    float colorReaction = clamp(uAudioFrequency * 0.8 + uBeat * 0.65, 0.0, 1.0);
+    vec3 mainColor = mix(vec3(0.2, 0.3, 0.9), vec3(0.65, 1.0, 0.35), colorReaction);
 
 
     mainColor.r *= 0.9 + sin(time) / 3.2;
     mainColor.g *= 1.1 + cos(time / 2.0) / 2.5;
     mainColor.b *= 0.8 + cos(time / 5.0) / 4.0;
 
-    mainColor.rgb += 0.1;
+    mainColor.rgb += 0.1 + vec3(0.14, 0.05, 0.18) * uBeat;
 
 
     Color[4] colors = Color[](
