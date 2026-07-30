@@ -20,6 +20,7 @@ import { Experience } from "./components/Experience";
 import { DanceCrowd } from "./components/Dancers/Dancers";
 import { ClubArchitecture } from "./components/ClubArchitecture/ClubArchitecture";
 import { ClubSmoke } from "./components/ClubSmoke/ClubSmoke";
+import { CreatorLinks } from "./components/CreatorLinks/CreatorLinks";
 import { TV } from "./components/TV/TV";
 import wae from "/music/wae.mp3";
 
@@ -636,6 +637,7 @@ function App() {
         </button>
         <p className="landing__hint">sound on · drag to look around</p>
       </main>
+      <CreatorLinks />
     </div>
   );
 }
