@@ -33,6 +33,55 @@ const concertLights = [
   { position: [0, 5.1, -3.8], color: "#24e0ca", phase: 5.5 },
 ];
 
+const mobileBeamVertexShader = /* glsl */ `
+  varying vec2 vBeamUv;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vBeamUv = uv;
+    vViewNormal = normalize(normalMatrix * normal);
+
+    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = viewPosition.xyz;
+    gl_Position = projectionMatrix * viewPosition;
+  }
+`;
+
+const mobileBeamFragmentShader = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+
+  varying vec2 vBeamUv;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vec3 viewDirection = normalize(-vViewPosition);
+    float facing = abs(dot(normalize(vViewNormal), viewDirection));
+    float softVolume = 0.06 + facing * facing * 0.94;
+
+    float sourceFade = smoothstep(0.0, 0.055, vBeamUv.y);
+    float endFade = 1.0 - smoothstep(0.72, 1.0, vBeamUv.y);
+    float distanceFade = 1.0 - vBeamUv.y * 0.66;
+
+    float grain = fract(
+      52.9829189 *
+      fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))
+    );
+    float alpha =
+      uOpacity *
+      sourceFade *
+      endFade *
+      distanceFade *
+      softVolume *
+      mix(0.965, 1.0, grain);
+
+    if (alpha < 0.001) discard;
+    gl_FragColor = vec4(uColor, alpha);
+  }
+`;
+
 function MovingSpot({
   audioBus,
   fixture = 0,
@@ -51,6 +100,13 @@ function MovingSpot({
   const beamEnd = useMemo(() => new THREE.Vector3(), []);
   const beamDirection = useMemo(() => new THREE.Vector3(), []);
   const beamAxis = useMemo(() => new THREE.Vector3(0, -1, 0), []);
+  const mobileBeamUniforms = useMemo(
+    () => ({
+      uColor: { value: new THREE.Color(props.color || "white") },
+      uOpacity: { value: 0 },
+    }),
+    [props.color]
+  );
 
   useFrame((state, delta) => {
     if (!light.current) return;
@@ -150,8 +206,8 @@ function MovingSpot({
       const beamLength = Math.max(beamDirection.length(), 0.01);
       const beamRadius = Math.min(2.15, beamLength * 0.3);
       const mobileOpacity = Math.min(
-        0.48,
-        desiredOpacity * 1.65 + (audioBus.isPlaying ? 0.012 : 0)
+        0.26,
+        desiredOpacity * 1.08 + (audioBus.isPlaying ? 0.006 : 0)
       );
 
       mobileBeam.current.position
@@ -162,13 +218,15 @@ function MovingSpot({
         beamDirection.normalize()
       );
       mobileBeam.current.scale.set(beamRadius, beamLength, beamRadius);
-      mobileBeam.current.material.opacity = THREE.MathUtils.damp(
-        mobileBeam.current.material.opacity,
+      const opacityUniform =
+        mobileBeam.current.material.uniforms.uOpacity;
+      opacityUniform.value = THREE.MathUtils.damp(
+        opacityUniform.value,
         mobileOpacity,
-        mobileOpacity > mobileBeam.current.material.opacity ? 18 : 9,
+        mobileOpacity > opacityUniform.value ? 18 : 9,
         delta
       );
-      mobileBeam.current.visible = mobileBeam.current.material.opacity > 0.002;
+      mobileBeam.current.visible = opacityUniform.value > 0.002;
     }
   });
 
@@ -194,15 +252,17 @@ function MovingSpot({
           renderOrder={2}
           raycast={() => null}
         >
-          <cylinderGeometry args={[0.025, 1, 1, 12, 1, true]} />
-          <meshBasicMaterial
-            color={props.color || "white"}
+          <cylinderGeometry args={[0.025, 1, 1, 32, 1, true]} />
+          <shaderMaterial
+            uniforms={mobileBeamUniforms}
+            vertexShader={mobileBeamVertexShader}
+            fragmentShader={mobileBeamFragmentShader}
             transparent
-            opacity={0}
             depthWrite={false}
             side={THREE.DoubleSide}
             blending={THREE.AdditiveBlending}
             toneMapped={false}
+            forceSinglePass
           />
         </mesh>
       )}
