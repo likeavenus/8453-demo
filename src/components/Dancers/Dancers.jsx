@@ -125,6 +125,8 @@ function Dancer({ audioBus, dancer, index }) {
   const activeMode = useRef(null);
   const activeAction = useRef(null);
   const idleVariant = useRef(Math.random() < 0.5 ? 0 : 1);
+  const smoothedDanceRate = useRef(1);
+  const lastSeekVersion = useRef(audioBus.seekVersion);
 
   const character = useMemo(() => {
     const cloned = cloneSkeleton(sourceModel);
@@ -222,17 +224,38 @@ function Dancer({ audioBus, dancer, index }) {
     if (!dancerActions) return;
 
     const nextMode = audioBus.isPlaying ? "dance" : "idle";
-    const preferredDanceRate = dancer.speed * 1.12;
+    const bpmRatio = THREE.MathUtils.clamp((audioBus.bpm || 120) / 120, 0.72, 1.4);
+    const tempoResponse = Math.pow(bpmRatio, 0.62);
+    const preferredDanceRate = dancer.speed * 1.1 * tempoResponse;
     const danceRate = getBeatAlignedRate(
       dancerActions.danceClip.duration,
       audioBus.bpm,
       preferredDanceRate
     );
+    const musicalAccent = audioBus.isPlaying
+      ? audioBus.kick * 0.2 + audioBus.clap * 0.075 + audioBus.body * 0.055
+      : 0;
+    const targetDanceRate = danceRate * (1 + musicalAccent);
+
+    smoothedDanceRate.current = THREE.MathUtils.damp(
+      smoothedDanceRate.current,
+      targetDanceRate,
+      targetDanceRate > smoothedDanceRate.current ? 16 : 7,
+      delta
+    );
 
     dancerActions.dance.setEffectiveTimeScale(
-      danceRate * (1 + audioBus.body * 0.018)
+      smoothedDanceRate.current
     );
     dancerActions.idle.setEffectiveTimeScale(0.88 + index * 0.018);
+
+    if (lastSeekVersion.current !== audioBus.seekVersion) {
+      dancerActions.dance.time =
+        (audioBus.position * danceRate +
+          dancerActions.danceClip.duration * dancer.offset) %
+        dancerActions.danceClip.duration;
+      lastSeekVersion.current = audioBus.seekVersion;
+    }
 
     if (nextMode !== activeMode.current) {
       const previousAction = activeAction.current;
@@ -264,15 +287,39 @@ function Dancer({ audioBus, dancer, index }) {
     mixer.update(Math.min(delta, 0.1));
 
     if (group.current) {
-      const breathingScale = 1 + audioBus.body * 0.007;
-      group.current.scale.setScalar(breathingScale);
+      const targetScale =
+        1 + audioBus.body * 0.008 + audioBus.kick * 0.012;
+      const smoothedScale = THREE.MathUtils.damp(
+        group.current.scale.x,
+        targetScale,
+        targetScale > group.current.scale.x ? 15 : 8,
+        delta
+      );
+      group.current.scale.setScalar(smoothedScale);
+
+      const beatPhase =
+        audioBus.position * ((audioBus.bpm || 120) / 60) * Math.PI * 2;
       const danceFloat = audioBus.isPlaying
-        ? Math.sin(state.clock.elapsedTime * 0.7 + index) * 0.008
+        ? Math.sin(beatPhase + index * 0.82) *
+            (0.005 + audioBus.body * 0.006) +
+          audioBus.kick * (0.022 + (index % 3) * 0.003)
         : 0;
       group.current.position.y = THREE.MathUtils.damp(
         group.current.position.y,
         dancer.position[1] + danceFloat,
-        8,
+        danceFloat > 0 ? 14 : 8,
+        delta
+      );
+
+      const clapDirection = index % 2 === 0 ? 1 : -1;
+      const targetTilt = audioBus.isPlaying
+        ? clapDirection *
+          (audioBus.clap * 0.018 + audioBus.beat * 0.006)
+        : 0;
+      group.current.rotation.z = THREE.MathUtils.damp(
+        group.current.rotation.z,
+        targetTilt,
+        targetTilt !== 0 ? 15 : 7,
         delta
       );
     }
@@ -289,17 +336,25 @@ function Dancer({ audioBus, dancer, index }) {
   );
 }
 
-export function DanceCrowd({ audioBus }) {
+export function DanceCrowd({ audioBus, lowPower = false }) {
+  const visibleCrowd = lowPower
+    ? crowd.filter((_, index) => [0, 1, 2, 3, 5].includes(index))
+    : crowd;
+
   return (
     <group>
-      {crowd.map((dancer, index) => (
-        <Dancer
-          key={`${dancer.model}-${dancer.animation}-${index}`}
-          audioBus={audioBus}
-          dancer={dancer}
-          index={index}
-        />
-      ))}
+      {visibleCrowd.map((dancer) => {
+        const index = crowd.indexOf(dancer);
+
+        return (
+          <Dancer
+            key={`${dancer.model}-${dancer.animation}-${index}`}
+            audioBus={audioBus}
+            dancer={dancer}
+            index={index}
+          />
+        );
+      })}
     </group>
   );
 }

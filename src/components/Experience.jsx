@@ -74,7 +74,7 @@ export const Experience = ({ audioBus, introStarted, trackName }) => {
     const kickLift = audioBus.kick * 0.105;
     const scale = reveal * (1 + audioBus.kick * 0.075 + audioBus.body * 0.018);
 
-    group.current.position.set(0, 3.43 + float + kickLift, 0.02);
+    group.current.position.set(0, 3.65 + float + kickLift, 0.02);
     group.current.quaternion.copy(camera.quaternion);
     group.current.rotateZ(
       Math.sin(state.clock.elapsedTime * 0.46) * 0.008 +
@@ -96,7 +96,7 @@ export const Experience = ({ audioBus, introStarted, trackName }) => {
   });
 
   return (
-    <group ref={group} position={[0, 3.43, 0.02]} scale={0}>
+    <group ref={group} position={[0, 3.65, 0.02]} scale={0}>
       {label.artist && (
         <Center position={[0, 0.34, 0]}>
           <Text3D

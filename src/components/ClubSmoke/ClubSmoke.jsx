@@ -6,7 +6,7 @@ import smokeFragmentShader from "../../shaders/smoke/fragment.glsl";
 
 const smokeBounds = [10, 4.5, 8];
 
-export function ClubSmoke({ audioBus }) {
+export function ClubSmoke({ audioBus, lowPower = false }) {
   const mesh = useRef(null);
   const material = useRef(null);
   const camera = useThree((state) => state.camera);
@@ -59,6 +59,7 @@ export function ClubSmoke({ audioBus }) {
         vertexShader={smokeVertexShader}
         fragmentShader={smokeFragmentShader}
         uniforms={uniforms}
+        defines={lowPower ? { LOW_POWER: 1 } : {}}
         side={THREE.BackSide}
         transparent
         depthTest={false}

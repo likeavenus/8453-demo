@@ -4,7 +4,6 @@ import {
   MeshReflectorMaterial,
   OrbitControls,
   SpotLight,
-  useDepthBuffer,
   useProgress,
 } from "@react-three/drei";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
@@ -38,6 +37,7 @@ function MovingSpot({
   fixture = 0,
   phase = 0,
   intensity = 8,
+  lowPower = false,
   ...props
 }) {
   const light = useRef(null);
@@ -135,7 +135,8 @@ function MovingSpot({
   return (
     <SpotLight
       ref={light}
-      castShadow={fixture % 2 === 0}
+      castShadow={!lowPower && fixture === 2}
+      volumetric={!lowPower && (fixture % 2 === 0 || fixture === 5)}
       penumbra={0.82}
       distance={11.5}
       angle={0.34}
@@ -195,7 +196,7 @@ function ClubWash({ audioBus }) {
   );
 }
 
-function DanceFloor({ audioBus }) {
+function DanceFloor({ audioBus, lowPower = false }) {
   const rings = useRef([]);
 
   useFrame((state, delta) => {
@@ -222,7 +223,9 @@ function DanceFloor({ audioBus }) {
 
         return (
           <mesh key={innerRadius}>
-            <ringGeometry args={[innerRadius, innerRadius + 0.055, 128]} />
+            <ringGeometry
+              args={[innerRadius, innerRadius + 0.055, lowPower ? 64 : 96]}
+            />
             <meshBasicMaterial
               ref={(material) => {
                 rings.current[index] = material;
@@ -240,7 +243,7 @@ function DanceFloor({ audioBus }) {
   );
 }
 
-function ReactivePostprocessing({ audioBus }) {
+function ReactivePostprocessing({ audioBus, lowPower = false }) {
   const bloom = useRef(null);
 
   useFrame(() => {
@@ -249,6 +252,8 @@ function ReactivePostprocessing({ audioBus }) {
         0.24 + audioBus.body * 0.18 + audioBus.beat * 0.25;
     }
   });
+
+  if (lowPower) return null;
 
   return (
     <EffectComposer multisampling={0}>
@@ -262,6 +267,38 @@ function ReactivePostprocessing({ audioBus }) {
       <Noise opacity={0.018} />
       <Vignette eskil={false} offset={0.18} darkness={0.82} />
     </EffectComposer>
+  );
+}
+
+function ClubFloor({ lowPower = false }) {
+  return (
+    <mesh receiveShadow={!lowPower} position={[0, -1, 0]} rotation-x={-Math.PI / 2}>
+      <planeGeometry args={[50, 50]} />
+      {lowPower ? (
+        <meshStandardMaterial
+          color="#090910"
+          metalness={0.82}
+          roughness={0.32}
+        />
+      ) : (
+        <MeshReflectorMaterial
+          color="#090910"
+          resolution={256}
+          mirror={0.2}
+          mixStrength={0.56}
+          mixContrast={1.06}
+          blur={[144, 48]}
+          mixBlur={1.05}
+          metalness={0.72}
+          roughness={0.58}
+          depthScale={0.26}
+          minDepthThreshold={0.34}
+          maxDepthThreshold={1.18}
+          depthToBlurRatioBias={0.4}
+          reflectorOffset={0.015}
+        />
+      )}
+    </mesh>
   );
 }
 
@@ -283,9 +320,8 @@ function SceneThree({
   onAudioReady,
   onDancersReady,
   onSceneReady,
+  lowPower,
 }) {
-  const depthBuffer = useDepthBuffer({ frames: Infinity, size: 512 });
-
   return (
     <>
       <AudioVisualizer
@@ -295,17 +331,21 @@ function SceneThree({
         shouldPlay={shouldPlay}
         showStatus={showAudioStatus}
       />
-      <ClubArchitecture audioBus={audioBus} />
+      <ClubArchitecture audioBus={audioBus} lowPower={lowPower} />
       <Suspense fallback={null}>
         <TV
-          position={[3.75, 1.25, -4.08]}
+          audioBus={audioBus}
+          position={[0, 4.6, -4.04]}
           rotation={[0, 0, 0]}
-          scale={0.48}
+          scale={1}
+          screenSize={[5.2, 2.1]}
+          shouldPlay={shouldPlay}
+          lowPower={lowPower}
         />
       </Suspense>
-      <ClubSmoke audioBus={audioBus} />
+      <ClubSmoke audioBus={audioBus} lowPower={lowPower} />
       <Suspense fallback={null}>
-        <DanceCrowd audioBus={audioBus} />
+        <DanceCrowd audioBus={audioBus} lowPower={lowPower} />
         <ReadySignal onReady={onDancersReady} />
       </Suspense>
 
@@ -316,26 +356,8 @@ function SceneThree({
           trackName={trackName}
         />
       </Suspense>
-      <mesh receiveShadow position={[0, -1, 0]} rotation-x={-Math.PI / 2}>
-        <planeGeometry args={[50, 50]} />
-        <MeshReflectorMaterial
-          color="#090910"
-          resolution={512}
-          mirror={0.22}
-          mixStrength={0.62}
-          mixContrast={1.08}
-          blur={[320, 96]}
-          mixBlur={1.15}
-          metalness={0.72}
-          roughness={0.56}
-          depthScale={0.32}
-          minDepthThreshold={0.32}
-          maxDepthThreshold={1.25}
-          depthToBlurRatioBias={0.38}
-          reflectorOffset={0.015}
-        />
-      </mesh>
-      <DanceFloor audioBus={audioBus} />
+      <ClubFloor lowPower={lowPower} />
+      <DanceFloor audioBus={audioBus} lowPower={lowPower} />
 
       <ambientLight intensity={0.035} />
       <ClubWash audioBus={audioBus} />
@@ -343,15 +365,15 @@ function SceneThree({
         <MovingSpot
           key={`${light.color}-${fixture}`}
           audioBus={audioBus}
-          depthBuffer={depthBuffer}
           color={light.color}
           position={light.position}
           phase={light.phase}
           fixture={fixture}
           intensity={fixture === 2 || fixture === 5 ? 7 : 8}
+          lowPower={lowPower}
         />
       ))}
-      <ReactivePostprocessing audioBus={audioBus} />
+      <ReactivePostprocessing audioBus={audioBus} lowPower={lowPower} />
       <ReadySignal onReady={onSceneReady} />
     </>
   );
@@ -372,7 +394,109 @@ function Controls() {
   );
 }
 
+const formatTrackTime = (seconds) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+
+  const totalSeconds = Math.floor(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${remainder}`;
+};
+
+function TrackTimeline({ audioBus }) {
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const scrubbing = useRef(false);
+
+  useEffect(() => {
+    const updateTimeline = () => {
+      const nextDuration = audioBus.duration || 0;
+      setDuration((current) =>
+        Math.abs(current - nextDuration) > 0.01 ? nextDuration : current
+      );
+
+      if (!scrubbing.current) {
+        const nextPosition = audioBus.position || 0;
+        setPosition((current) =>
+          Math.abs(current - nextPosition) > 0.04 ? nextPosition : current
+        );
+      }
+    };
+
+    updateTimeline();
+    const interval = window.setInterval(updateTimeline, 80);
+    return () => window.clearInterval(interval);
+  }, [audioBus]);
+
+  const commitSeek = (value) => {
+    const nextPosition = Number(value);
+    if (!Number.isFinite(nextPosition)) return;
+
+    const committedPosition = audioBus.seek?.(nextPosition) ?? nextPosition;
+    setPosition(committedPosition);
+  };
+
+  const handleChange = (event) => {
+    const nextPosition = Number(event.currentTarget.value);
+    setPosition(nextPosition);
+
+    if (!scrubbing.current) commitSeek(nextPosition);
+  };
+
+  const finishScrubbing = (event) => {
+    if (!scrubbing.current) return;
+    scrubbing.current = false;
+    commitSeek(event.currentTarget.value);
+  };
+
+  const progress = duration > 0 ? (position / duration) * 100 : 0;
+
+  return (
+    <div className="music-dock__timeline">
+      <span className="music-dock__time">{formatTrackTime(position)}</span>
+      <input
+        className="music-dock__seek"
+        type="range"
+        min="0"
+        max={duration || 1}
+        step="0.01"
+        value={Math.min(position, duration || 0)}
+        disabled={!duration}
+        aria-label="Seek through track"
+        aria-valuetext={`${formatTrackTime(position)} of ${formatTrackTime(
+          duration
+        )}`}
+        style={{ "--seek-progress": `${progress}%` }}
+        onPointerDown={(event) => {
+          scrubbing.current = true;
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        }}
+        onPointerUp={finishScrubbing}
+        onPointerCancel={finishScrubbing}
+        onBlur={finishScrubbing}
+        onChange={handleChange}
+      />
+      <span className="music-dock__time music-dock__time--duration">
+        {formatTrackTime(duration)}
+      </span>
+    </div>
+  );
+}
+
 function App() {
+  const [renderProfile] = useState(() => {
+    const compactViewport = window.matchMedia("(max-width: 820px)").matches;
+    const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+    const cpuCores = navigator.hardwareConcurrency || 8;
+    const deviceMemory = navigator.deviceMemory || 8;
+    const lowPower =
+      compactViewport || coarsePointer || cpuCores <= 4 || deviceMemory <= 4;
+
+    return {
+      lowPower,
+      dpr: lowPower ? [0.75, 1] : [1, 1.25],
+    };
+  });
   const [isStarted, setStarted] = useState(() =>
     new URLSearchParams(window.location.search).has("autostart")
   );
@@ -433,10 +557,13 @@ function App() {
   return (
     <div className={`stage-shell ${isStarted ? "" : "stage-shell--preview"}`}>
       <Canvas
-        shadows
-        dpr={[1, 1.5]}
+        shadows={!renderProfile.lowPower}
+        dpr={renderProfile.dpr}
         camera={{ position: [0, 1.55, 7.4], fov: 48, near: 0.1, far: 50 }}
-        gl={{ antialias: true, powerPreference: "high-performance" }}
+        gl={{
+          antialias: !renderProfile.lowPower,
+          powerPreference: renderProfile.lowPower ? "low-power" : "default",
+        }}
       >
         <Controls />
         <color attach="background" args={["#09090d"]} />
@@ -451,6 +578,7 @@ function App() {
           onAudioReady={handleAudioReady}
           onDancersReady={handleDancersReady}
           onSceneReady={handleSceneReady}
+          lowPower={renderProfile.lowPower}
         />
       </Canvas>
 
@@ -475,6 +603,7 @@ function App() {
             LOAD TRACK
             <input type="file" accept="audio/*" onChange={handleTrackUpload} />
           </label>
+          <TrackTimeline audioBus={audioBus} />
         </div>
       )}
 

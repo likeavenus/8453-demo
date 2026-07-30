@@ -44,6 +44,9 @@ export const createAudioBus = () => ({
   status: "idle",
   isPlaying: false,
   position: 0,
+  duration: 0,
+  seek: null,
+  seekVersion: 0,
   beat: 0,
   impact: 0,
   kick: 0,
@@ -83,6 +86,7 @@ class MusicReactiveEngine {
     this.audioBus.isPlaying = false;
     this.audioBus.bpm = null;
     this.audioBus.position = 0;
+    this.audioBus.duration = 0;
     this.audioBus.onsetCount = 0;
     this.audioBus.kickCount = 0;
     this.audioBus.clapCount = 0;
@@ -110,6 +114,7 @@ class MusicReactiveEngine {
     this.sound.setLoop(true);
     this.sound.setVolume(0.72);
     this.audioBus.position = 0;
+    this.audioBus.duration = buffer.duration;
     this.audioBus.status = "ready";
 
     return analysis;
@@ -131,6 +136,52 @@ class MusicReactiveEngine {
     this.audioBus.position = this.getPlaybackPosition();
     this.audioBus.isPlaying = false;
     this.audioBus.status = this.analysis ? "paused" : "idle";
+  }
+
+  seek(position) {
+    if (!this.sound.buffer) return 0;
+
+    const duration = this.sound.duration || this.sound.buffer.duration;
+    const nextPosition = THREE.MathUtils.clamp(
+      Number.isFinite(position) ? position : 0,
+      0,
+      Math.max(duration - 0.001, 0)
+    );
+    const wasPlaying = this.sound.isPlaying;
+
+    if (wasPlaying) this.sound.pause();
+
+    this.sound.offset = 0;
+    this.sound._progress = nextPosition;
+    this.audioBus.position = nextPosition;
+    this.audioBus.beat = 0;
+    this.audioBus.impact = 0;
+    this.audioBus.kick = 0;
+    this.audioBus.clap = 0;
+    this.audioBus.body = 0;
+
+    const syncPosition = nextPosition + VISUAL_LEAD_SECONDS;
+    const cursorPosition = Math.min(syncPosition, duration);
+    const onsets = this.analysis?.onsets || [];
+    let low = 0;
+    let high = onsets.length;
+
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (onsets[middle].time <= cursorPosition) low = middle + 1;
+      else high = middle;
+    }
+
+    this.onsetCursor = low;
+    this.previousSyncPosition = syncPosition;
+    this.lastComfortFlash = syncPosition;
+    this.audioBus.beatCount = this.audioBus.bpm
+      ? Math.floor((nextPosition * this.audioBus.bpm) / 60)
+      : 0;
+    this.audioBus.seekVersion += 1;
+
+    if (wasPlaying) this.sound.play();
+    return nextPosition;
   }
 
   readBand(data, minimumHz, maximumHz) {
@@ -291,6 +342,7 @@ class MusicReactiveEngine {
     this.audioBus.status = "idle";
     this.audioBus.isPlaying = false;
     this.audioBus.position = 0;
+    this.audioBus.duration = 0;
   }
 }
 
@@ -343,6 +395,8 @@ export const AudioVisualizer = ({
 
     camera.add(listener);
     engineRef.current = engine;
+    const seek = (position) => engine.seek(position);
+    audioBus.seek = seek;
     audioBus.status = "analyzing";
     audioBus.isPlaying = false;
     window.__8453_AUDIO__ = audioBus;
@@ -385,6 +439,7 @@ export const AudioVisualizer = ({
       engine.dispose();
       camera.remove(listener);
       engineRef.current = null;
+      if (audioBus.seek === seek) audioBus.seek = null;
       if (path instanceof Blob) trackCache.delete(path);
     };
   }, [audioBus, camera, onReady, path]);

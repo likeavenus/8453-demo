@@ -7,7 +7,11 @@ uniform vec3 uCameraLocal;
 
 varying vec3 vLocalPosition;
 
-#define MARCH_STEPS 28
+#ifdef LOW_POWER
+  #define MARCH_STEPS 10
+#else
+  #define MARCH_STEPS 20
+#endif
 
 float hash31(vec3 point) {
   point = fract(point * 0.1031);
@@ -46,9 +50,11 @@ float fbm(vec3 point) {
   point = point * 2.03 + vec3(17.1, 9.2, 13.7);
   amplitude *= 0.5;
   total += valueNoise(point) * amplitude;
+#ifndef LOW_POWER
   point = point * 2.01 + vec3(8.3, 19.4, 5.6);
   amplitude *= 0.5;
   total += valueNoise(point) * amplitude;
+#endif
 
   return total;
 }
