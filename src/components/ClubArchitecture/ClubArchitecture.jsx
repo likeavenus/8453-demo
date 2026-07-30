@@ -62,6 +62,11 @@ const createSpeakerCabinet = () =>
     createBrush(new THREE.BoxGeometry(0.72, 0.22, 1), [0, -1.23, 0]),
   ]);
 
+const createDjBoothShell = () =>
+  subtractBrushes(createBrush(new THREE.BoxGeometry(4.45, 1.12, 0.86)), [
+    createBrush(new THREE.BoxGeometry(3.72, 0.72, 0.34), [0, 0.02, 0.4]),
+  ]);
+
 const createSideWall = () =>
   subtractBrushes(createBrush(new THREE.BoxGeometry(0.38, 3.65, 5.8)), [
     ...[-1.75, 0, 1.75].map((z) =>
@@ -91,6 +96,9 @@ const createRotor = () => {
 
 const bars = Array.from({ length: 8 }, (_, index) => index);
 const stageSegments = Array.from({ length: 12 }, (_, index) => index);
+const djMeterSegments = Array.from({ length: 15 }, (_, index) => index);
+const djPadSegments = Array.from({ length: 8 }, (_, index) => index);
+const djBandColors = ["#9d55ff", "#27c9ff", "#ff357d", "#ba70ff", "#f4f7ff"];
 const speakerDrivers = [
   { y: 0.72, radius: 0.435 },
   { y: -0.31, radius: 0.325 },
@@ -117,6 +125,7 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
   const speakerGeometry = useMemo(createSpeakerCabinet, []);
   const sideWallGeometry = useMemo(createSideWall, []);
   const rotorGeometry = useMemo(createRotor, []);
+  const djBoothGeometry = useMemo(createDjBoothShell, []);
   const portal = useRef(null);
   const portalCore = useRef(null);
   const lightBars = useRef([]);
@@ -127,6 +136,11 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
   const ventLights = useRef([]);
   const sideRotors = useRef([]);
   const stageMeters = useRef([]);
+  const djMeters = useRef([]);
+  const djPlatters = useRef([]);
+  const djDeckRings = useRef([]);
+  const djPadMaterials = useRef([]);
+  const djScreen = useRef(null);
 
   useEffect(
     () => () => {
@@ -134,8 +148,15 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
       speakerGeometry.dispose();
       sideWallGeometry.dispose();
       rotorGeometry.dispose();
+      djBoothGeometry.dispose();
     },
-    [rotorGeometry, sideWallGeometry, speakerGeometry, wallGeometry]
+    [
+      djBoothGeometry,
+      rotorGeometry,
+      sideWallGeometry,
+      speakerGeometry,
+      wallGeometry,
+    ]
   );
 
   useFrame((state, delta) => {
@@ -255,6 +276,69 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
       meter.material.emissiveIntensity =
         0.08 + band * 0.42 + chase * audioBus.beat * 0.55;
     });
+
+    djMeters.current.forEach((meter, index) => {
+      if (!meter) return;
+
+      const bandIndex = index % 5;
+      const band =
+        bandIndex === 0
+          ? audioBus.sub
+          : bandIndex === 1
+            ? audioBus.bass
+            : bandIndex === 2
+              ? audioBus.lowMid
+              : bandIndex === 3
+                ? audioBus.presence
+                : audioBus.high;
+      const transient =
+        bandIndex < 2
+          ? audioBus.kick
+          : bandIndex === 4
+            ? Math.max(audioBus.highFlux, audioBus.hat)
+            : audioBus.presenceFlux;
+      const targetScale = 0.16 + band * 0.82 + transient * 0.24;
+
+      meter.scale.y = THREE.MathUtils.damp(
+        meter.scale.y,
+        targetScale,
+        targetScale > meter.scale.y ? 18 : 8,
+        delta
+      );
+      meter.material.emissiveIntensity = 0.1 + band * 0.58 + transient * 0.4;
+    });
+
+    djPlatters.current.forEach((platter, index) => {
+      if (!platter || !audioBus.isPlaying) return;
+      const direction = index === 0 ? 1 : -1;
+      platter.rotation.y +=
+        delta * direction * (1.05 + (audioBus.bpm || 120) / 150);
+    });
+
+    djDeckRings.current.forEach((material) => {
+      if (!material) return;
+      material.emissiveIntensity =
+        0.12 + audioBus.bass * 0.42 + audioBus.kick * 0.7;
+    });
+
+    djPadMaterials.current.forEach((material, index) => {
+      if (!material) return;
+      const visiblePadCount = lowPower ? djPadSegments.length / 2 : djPadSegments.length;
+      const activePadIndex =
+        (audioBus.clapHitCount + audioBus.hatHitCount) % visiblePadCount;
+      const activePad = lowPower ? activePadIndex * 2 : activePadIndex;
+      const isActive = index === activePad;
+      material.emissiveIntensity =
+        0.08 +
+        audioBus.presence * 0.2 +
+        (isActive ? Math.max(audioBus.clap, audioBus.hat, audioBus.highFlux) : 0) *
+          0.9;
+    });
+
+    if (djScreen.current) {
+      djScreen.current.emissiveIntensity =
+        0.16 + audioBus.presence * 0.34 + audioBus.highFlux * 0.52;
+    }
   });
 
   return (
@@ -362,6 +446,237 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
             </mesh>
           );
         })}
+      </group>
+
+      <group position={[0, -0.36, -3.2]}>
+        <mesh
+          geometry={djBoothGeometry}
+          position={[0, 0.56, 0]}
+          castShadow={!lowPower}
+          receiveShadow
+        >
+          <meshStandardMaterial
+            color="#101018"
+            metalness={0.78}
+            roughness={0.3}
+          />
+        </mesh>
+
+        <mesh position={[0, 0.58, 0.442]}>
+          <boxGeometry args={[3.74, 0.74, 0.032]} />
+          <meshStandardMaterial
+            color="#080811"
+            metalness={0.48}
+            roughness={0.42}
+          />
+        </mesh>
+
+        {(lowPower
+          ? djMeterSegments.filter((index) => index % 2 === 0)
+          : djMeterSegments
+        ).map((index) => {
+          const color = djBandColors[index % djBandColors.length];
+
+          return (
+            <mesh
+              key={`dj-meter-${index}`}
+              ref={(mesh) => {
+                djMeters.current[index] = mesh;
+              }}
+              position={[-1.64 + index * 0.234, 0.58, 0.465]}
+              scale-y={0.16}
+            >
+              <boxGeometry args={[0.135, 0.48, 0.024]} />
+              <meshStandardMaterial
+                color={color}
+                emissive={color}
+                emissiveIntensity={0.1}
+                metalness={0.32}
+                roughness={0.28}
+                toneMapped={false}
+              />
+            </mesh>
+          );
+        })}
+
+        <mesh position={[0, 1.14, 0.02]} castShadow={!lowPower} receiveShadow>
+          <boxGeometry args={[4.72, 0.1, 1.08]} />
+          <meshStandardMaterial
+            color="#282936"
+            metalness={0.88}
+            roughness={0.22}
+          />
+        </mesh>
+
+        {[-1, 1].map((side, deckIndex) => (
+          <group key={`dj-deck-${side}`} position={[side * 1.34, 1.24, 0.08]}>
+            <mesh castShadow={!lowPower}>
+              <boxGeometry args={[1.15, 0.09, 0.72]} />
+              <meshStandardMaterial
+                color="#171821"
+                metalness={0.76}
+                roughness={0.28}
+              />
+            </mesh>
+
+            <group
+              ref={(group) => {
+                djPlatters.current[deckIndex] = group;
+              }}
+              position={[0, 0.075, 0]}
+            >
+              <mesh>
+                <cylinderGeometry args={[0.31, 0.31, 0.045, 36]} />
+                <meshStandardMaterial
+                  color="#0a0b10"
+                  metalness={0.86}
+                  roughness={0.24}
+                />
+              </mesh>
+              <mesh position={[0, 0.027, 0.17]}>
+                <boxGeometry args={[0.035, 0.016, 0.16]} />
+                <meshBasicMaterial color="#e9ecf6" />
+              </mesh>
+              <mesh position={[0, 0.027, 0]} rotation-x={Math.PI / 2}>
+                <torusGeometry args={[0.315, 0.018, 8, 40]} />
+                <meshStandardMaterial
+                  ref={(material) => {
+                    djDeckRings.current[deckIndex] = material;
+                  }}
+                  color={side < 0 ? "#27c9ff" : "#ff357d"}
+                  emissive={side < 0 ? "#27c9ff" : "#ff357d"}
+                  emissiveIntensity={0.12}
+                  toneMapped={false}
+                />
+              </mesh>
+            </group>
+
+            <mesh position={[side * -0.43, 0.085, 0.23]}>
+              <boxGeometry args={[0.11, 0.025, 0.11]} />
+              <meshStandardMaterial
+                color={side < 0 ? "#27c9ff" : "#ff357d"}
+                emissive={side < 0 ? "#27c9ff" : "#ff357d"}
+                emissiveIntensity={0.1}
+                toneMapped={false}
+              />
+            </mesh>
+          </group>
+        ))}
+
+        <group position={[0, 1.245, 0.08]}>
+          <mesh castShadow={!lowPower}>
+            <boxGeometry args={[0.9, 0.1, 0.74]} />
+            <meshStandardMaterial
+              color="#14151d"
+              metalness={0.74}
+              roughness={0.3}
+            />
+          </mesh>
+
+          {(lowPower ? [-0.24, 0, 0.24] : [-0.3, -0.15, 0, 0.15, 0.3]).map(
+            (x, index) => (
+              <group key={`mixer-channel-${x}`} position={[x, 0.075, -0.08]}>
+                <mesh>
+                  <cylinderGeometry args={[0.032, 0.032, 0.035, 12]} />
+                  <meshStandardMaterial
+                    color="#a9abb8"
+                    metalness={0.9}
+                    roughness={0.2}
+                  />
+                </mesh>
+                <mesh position={[0, 0, 0.23]}>
+                  <boxGeometry args={[0.035, 0.026, 0.18]} />
+                  <meshStandardMaterial
+                    color={djBandColors[index % djBandColors.length]}
+                    emissive={djBandColors[index % djBandColors.length]}
+                    emissiveIntensity={0.08}
+                    toneMapped={false}
+                  />
+                </mesh>
+              </group>
+            )
+          )}
+        </group>
+
+        {(lowPower
+          ? djPadSegments.filter((index) => index % 2 === 0)
+          : djPadSegments
+        ).map((index) => {
+          const column = index % 4;
+          const row = Math.floor(index / 4);
+          const color = index % 2 === 0 ? "#27c9ff" : "#ff357d";
+
+          return (
+            <mesh
+              key={`dj-pad-${index}`}
+              position={[-0.27 + column * 0.18, 1.325, -0.12 + row * 0.19]}
+            >
+              <boxGeometry args={[0.12, 0.025, 0.12]} />
+              <meshStandardMaterial
+                ref={(material) => {
+                  djPadMaterials.current[index] = material;
+                }}
+                color={color}
+                emissive={color}
+                emissiveIntensity={0.08}
+                toneMapped={false}
+              />
+            </mesh>
+          );
+        })}
+
+        <mesh position={[0, 1.31, -0.25]} rotation-x={-0.12} castShadow={!lowPower}>
+          <boxGeometry args={[1.22, 0.045, 0.5]} />
+          <meshStandardMaterial
+            color="#20212b"
+            metalness={0.78}
+            roughness={0.28}
+          />
+        </mesh>
+        <group position={[0, 1.66, -0.44]} rotation-x={-0.08}>
+          <mesh castShadow={!lowPower}>
+            <boxGeometry args={[1.18, 0.68, 0.055]} />
+            <meshStandardMaterial
+              color="#171821"
+              metalness={0.82}
+              roughness={0.25}
+            />
+          </mesh>
+          <mesh position={[0, 0, 0.031]}>
+            <planeGeometry args={[1.04, 0.54]} />
+            <meshStandardMaterial
+              ref={djScreen}
+              color="#17152d"
+              emissive="#7f42ff"
+              emissiveIntensity={0.16}
+              metalness={0.2}
+              roughness={0.34}
+              toneMapped={false}
+            />
+          </mesh>
+          <mesh position={[0, 0, 0.035]}>
+            <ringGeometry args={[0.09, 0.135, 32]} />
+            <meshBasicMaterial
+              color="#d7c8ff"
+              transparent
+              opacity={0.62}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
+
+        {[-1, 1].map((side) => (
+          <mesh key={`booth-edge-${side}`} position={[side * 2.04, 0.58, 0.455]}>
+            <boxGeometry args={[0.045, 0.82, 0.035]} />
+            <meshStandardMaterial
+              color={side < 0 ? "#27c9ff" : "#ff357d"}
+              emissive={side < 0 ? "#27c9ff" : "#ff357d"}
+              emissiveIntensity={0.18}
+              toneMapped={false}
+            />
+          </mesh>
+        ))}
       </group>
 
       {[-1, 1].map((side, sideIndex) => (

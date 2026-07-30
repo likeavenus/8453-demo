@@ -17,9 +17,16 @@ const animations = {
   hipHop: characterUrl("Hip Hop Dancing.fbx"),
   samba: characterUrl("Samba Dancing.fbx"),
   silly: characterUrl("Silly Dancing.fbx"),
+  twerk: characterUrl("Dancing Twerk.fbx"),
   idle: characterUrl("Idle.fbx"),
   happyIdle: characterUrl("Happy Idle.fbx"),
 };
+
+const supportingDanceAnimations = ["dance", "hipHop", "samba", "silly"];
+const randomSupportingDance = () =>
+  supportingDanceAnimations[
+    Math.floor(Math.random() * supportingDanceAnimations.length)
+  ];
 
 const crowd = [
   {
@@ -84,6 +91,24 @@ const crowd = [
     tint: "#c4ccff",
     speed: 1,
     offset: 0.58,
+  },
+  {
+    model: "female",
+    animation: "twerk",
+    position: [-2.75, -0.96, 0.08],
+    rotation: 0.34,
+    tint: "#ff9bc9",
+    speed: 1.02,
+    offset: 0.66,
+  },
+  {
+    model: "male",
+    animation: randomSupportingDance(),
+    position: [2.78, -0.96, 0.02],
+    rotation: -0.32,
+    tint: "#92e8ff",
+    speed: 0.99,
+    offset: 0.18,
   },
 ];
 
@@ -338,7 +363,7 @@ function Dancer({ audioBus, dancer, index }) {
 
 export function DanceCrowd({ audioBus, lowPower = false }) {
   const visibleCrowd = lowPower
-    ? crowd.filter((_, index) => [0, 1, 2, 3, 5].includes(index))
+    ? crowd.filter((_, index) => [0, 1, 2, 7, 8].includes(index))
     : crowd;
 
   return (
