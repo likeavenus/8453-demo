@@ -121,9 +121,45 @@ button {
 }
 
 .music-dock__meta {
+  overflow: hidden;
   color: rgba(204, 179, 231, 0.52);
   font-size: 7px;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-dock__meta-row {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.music-dock__meta-row .music-dock__meta {
+  min-width: 0;
+}
+
+.music-dock__tempo-switch {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  color: rgba(114, 210, 255, 0.72);
+  background: transparent;
+  cursor: pointer;
+  font-size: 7px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.music-dock__tempo-switch:hover {
+  color: #fff;
+}
+
+.music-dock__tempo-switch:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.85);
+  outline-offset: 2px;
 }
 
 .music-dock__upload {
@@ -227,6 +263,47 @@ button {
 .music-dock__seek:disabled {
   cursor: wait;
   opacity: 0.34;
+}
+
+.music-dock__bands {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0 3px 2px;
+}
+
+.music-dock__band {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.music-dock__band-label {
+  overflow: hidden;
+  color: rgba(227, 216, 240, 0.48);
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+}
+
+.music-dock__band-track {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.music-dock__band-level {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--band-color);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--band-color) 58%, transparent);
+  transform-origin: left center;
+  transition: transform 70ms linear;
 }
 
 .creator-links {

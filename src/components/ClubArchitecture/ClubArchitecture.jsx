@@ -141,12 +141,12 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
   useFrame((state, delta) => {
     if (portal.current) {
       portal.current.emissiveIntensity =
-        0.42 + audioBus.body * 0.55 + audioBus.kick * 0.45;
+        0.34 + audioBus.presence * 0.52 + audioBus.clap * 0.28;
     }
 
     if (portalCore.current) {
       portalCore.current.opacity =
-        0.22 + audioBus.body * 0.12 + audioBus.impact * 0.08;
+        0.2 + audioBus.presence * 0.1 + audioBus.presenceFlux * 0.08;
     }
 
     lightBars.current.forEach((material, index) => {
@@ -157,14 +157,14 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
         0.5 * Math.sin(state.clock.elapsedTime * 1.15 + index * 0.72);
       material.emissiveIntensity =
         0.14 +
-        (audioBus.isPlaying ? wave * 0.28 : 0.025) +
-        audioBus.clap * (0.35 + index * 0.025);
+        (audioBus.isPlaying ? wave * audioBus.lowMid * 0.36 : 0.025) +
+        audioBus.lowMidFlux * (0.42 + index * 0.018);
     });
 
     speakerCones.current.forEach((cone, index) => {
       if (!cone) return;
 
-      const lowEnd = Math.max(audioBus.bass * 0.7, audioBus.kick);
+      const lowEnd = Math.max(audioBus.bass * 0.82, audioBus.kick);
       const response = 1 + lowEnd * (index % 2 === 0 ? 0.07 : 0.045);
       cone.scale.setScalar(response);
       cone.position.z = 0.374 + lowEnd * 0.018;
@@ -174,27 +174,33 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
     speakerRings.current.forEach((material, index) => {
       if (!material) return;
       material.emissiveIntensity =
-        0.06 + audioBus.kick * 0.34 + audioBus.body * (0.08 + index * 0.01);
+        0.06 + audioBus.kick * 0.3 + audioBus.bass * (0.12 + index * 0.01);
     });
 
     sideRings.current.forEach((material, index) => {
       if (!material) return;
 
-      const chaseIndex = audioBus.beatCount % sideRings.current.length;
+      const chaseIndex =
+        (audioBus.clapHitCount + audioBus.hatHitCount) %
+        sideRings.current.length;
       const isActive = index === chaseIndex;
       const idleWave =
         0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 0.62 + index * 1.37);
       material.emissiveIntensity =
         0.08 +
-        (audioBus.isPlaying ? idleWave * 0.12 : 0.02) +
-        (isActive ? audioBus.beat * 0.72 : audioBus.clap * 0.08);
+        (audioBus.isPlaying ? idleWave * audioBus.presence * 0.16 : 0.02) +
+        (isActive
+          ? audioBus.presenceFlux * 0.66
+          : audioBus.clap * 0.06);
     });
 
     ceilingBars.current.forEach((material, index) => {
       if (!material) return;
-      const isActive = index === audioBus.beatCount % ceilingRibs.length;
+      const isActive = index === audioBus.hatHitCount % ceilingRibs.length;
       material.emissiveIntensity =
-        0.08 + audioBus.body * 0.1 + (isActive ? audioBus.beat * 0.42 : 0);
+        0.06 +
+        audioBus.high * 0.18 +
+        (isActive ? Math.max(audioBus.highFlux, audioBus.hat) * 0.62 : 0);
     });
 
     ventLights.current.forEach((material, index) => {
@@ -202,8 +208,8 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
       const alternatingAccent = (audioBus.beatCount + index) % 3 === 0;
       material.emissiveIntensity =
         0.04 +
-        audioBus.bass * 0.1 +
-        (alternatingAccent ? audioBus.clap * 0.3 : 0);
+        audioBus.lowMid * 0.16 +
+        (alternatingAccent ? audioBus.lowMidFlux * 0.34 : 0);
     });
 
     sideRotors.current.forEach((rotor, index) => {
@@ -212,10 +218,13 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
       if (audioBus.isPlaying) {
         const direction = index % 2 === 0 ? 1 : -1;
         rotor.rotation.z +=
-          delta * direction * (0.2 + audioBus.bass * 0.75 + audioBus.body * 0.3);
+          delta *
+          direction *
+          (0.16 + audioBus.presence * 0.72 + audioBus.lowMid * 0.14);
       }
 
-      const targetScale = 1 + audioBus.kick * 0.035;
+      const targetScale =
+        1 + audioBus.presenceFlux * 0.045 + audioBus.clap * 0.018;
       const scale = THREE.MathUtils.damp(
         rotor.scale.x,
         targetScale,
@@ -230,12 +239,13 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
 
       const band =
         index % 3 === 0
-          ? audioBus.bass
+          ? audioBus.lowMid
           : index % 3 === 1
-            ? audioBus.mid
-            : audioBus.treble;
+            ? audioBus.presence
+            : audioBus.high;
       const chase = index === audioBus.beatCount % stageSegments.length ? 1 : 0;
-      const targetScale = 0.42 + band * 1.25 + audioBus.kick * 0.34;
+      const targetScale =
+        0.42 + band * 1.18 + audioBus.lowMidFlux * 0.22;
       meter.scale.y = THREE.MathUtils.damp(
         meter.scale.y,
         targetScale,

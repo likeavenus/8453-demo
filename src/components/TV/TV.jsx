@@ -57,7 +57,9 @@ export const TV = ({
     if (!accentMaterial.current) return;
 
     accentMaterial.current.emissiveIntensity =
-      0.2 + (audioBus?.body || 0) * 0.34 + (audioBus?.kick || 0) * 0.52;
+      0.16 +
+      (audioBus?.presence || 0) * 0.3 +
+      (audioBus?.highFlux || 0) * 0.42;
   });
 
   const bezel = 0.14;

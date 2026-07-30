@@ -43,15 +43,20 @@ function MovingSpot({
 }) {
   const light = useRef(null);
   const beamMaterial = useRef(null);
+  const mobileBeam = useRef(null);
   const previousBeat = useRef(-1);
   const beatTarget = useMemo(() => new THREE.Vector3(), []);
   const desiredTarget = useMemo(() => new THREE.Vector3(), []);
+  const beamSource = useMemo(() => new THREE.Vector3(), []);
+  const beamEnd = useMemo(() => new THREE.Vector3(), []);
+  const beamDirection = useMemo(() => new THREE.Vector3(), []);
+  const beamAxis = useMemo(() => new THREE.Vector3(0, -1, 0), []);
 
   useFrame((state, delta) => {
     if (!light.current) return;
 
     const time = state.clock.getElapsedTime();
-    const beatNumber = audioBus.beatCount;
+    const beatNumber = audioBus.hatHitCount + audioBus.clapHitCount;
 
     if (beatNumber !== previousBeat.current) {
       const seed = (beatNumber + 1) * (fixture + 2);
@@ -78,17 +83,21 @@ function MovingSpot({
     const isClapAccent =
       audioBus.clap > 0.24 && fixture === (step + 2) % concertLights.length;
     const pulse = Math.max(
-      audioBus.beat,
-      audioBus.kick * 0.94,
-      audioBus.clap * 0.78
+      audioBus.highFlux,
+      audioBus.hat,
+      audioBus.clap * 0.68
     );
     const chaseLevel = isPrimary ? 1 : isNeighbor ? 0.16 : 0;
     const shimmer = 0.5 + 0.5 * Math.sin(time * 2.15 + phase * 1.7);
     const desiredIntensity = audioBus.isPlaying
-      ? chaseLevel * (intensity * 0.58 + pulse * 24 + audioBus.body * 4.5) +
-        audioBus.kick * (fixture % 2 === 0 ? 8.5 : 5.5) +
-        (isClapAccent ? audioBus.clap * 14 : 0) +
-        (isPrimary ? shimmer * 1.2 : 0.05)
+      ? chaseLevel *
+          (intensity * 0.34 +
+            pulse * 22 +
+            audioBus.high * 11 +
+            audioBus.presence * 1.25) +
+        audioBus.highFlux * (fixture % 2 === 0 ? 6.5 : 4.5) +
+        (isClapAccent ? audioBus.clap * 11 : 0) +
+        (isPrimary ? shimmer * (0.7 + audioBus.high * 1.4) : 0.04)
       : 0;
 
     desiredTarget.set(
@@ -117,13 +126,15 @@ function MovingSpot({
       });
     }
 
+    const desiredOpacity = audioBus.isPlaying
+      ? 0.018 +
+        chaseLevel * 0.105 +
+        pulse * (isPrimary ? 0.25 : 0.06) +
+        audioBus.high * (isPrimary ? 0.075 : 0.015) +
+        (isClapAccent ? audioBus.clap * 0.13 : 0)
+      : 0;
+
     if (beamMaterial.current) {
-      const desiredOpacity = audioBus.isPlaying
-        ? 0.018 +
-          chaseLevel * 0.105 +
-          pulse * (isPrimary ? 0.24 : 0.055) +
-          (isClapAccent ? audioBus.clap * 0.13 : 0)
-        : 0;
       beamMaterial.current.uniforms.opacity.value = THREE.MathUtils.damp(
         beamMaterial.current.uniforms.opacity.value,
         desiredOpacity,
@@ -131,22 +142,71 @@ function MovingSpot({
         delta
       );
     }
+
+    if (mobileBeam.current) {
+      light.current.getWorldPosition(beamSource);
+      light.current.target.getWorldPosition(beamEnd);
+      beamDirection.copy(beamEnd).sub(beamSource);
+      const beamLength = Math.max(beamDirection.length(), 0.01);
+      const beamRadius = Math.min(2.15, beamLength * 0.3);
+      const mobileOpacity = Math.min(
+        0.48,
+        desiredOpacity * 1.65 + (audioBus.isPlaying ? 0.012 : 0)
+      );
+
+      mobileBeam.current.position
+        .copy(beamSource)
+        .addScaledVector(beamDirection, 0.5);
+      mobileBeam.current.quaternion.setFromUnitVectors(
+        beamAxis,
+        beamDirection.normalize()
+      );
+      mobileBeam.current.scale.set(beamRadius, beamLength, beamRadius);
+      mobileBeam.current.material.opacity = THREE.MathUtils.damp(
+        mobileBeam.current.material.opacity,
+        mobileOpacity,
+        mobileOpacity > mobileBeam.current.material.opacity ? 18 : 9,
+        delta
+      );
+      mobileBeam.current.visible = mobileBeam.current.material.opacity > 0.002;
+    }
   });
 
   return (
-    <SpotLight
-      ref={light}
-      castShadow={!lowPower && fixture === 2}
-      volumetric={!lowPower && (fixture % 2 === 0 || fixture === 5)}
-      penumbra={0.82}
-      distance={11.5}
-      angle={0.34}
-      attenuation={4.2}
-      anglePower={5.2}
-      opacity={0}
-      shadow-bias={-0.00015}
-      {...props}
-    />
+    <>
+      <SpotLight
+        ref={light}
+        castShadow={!lowPower && fixture === 2}
+        volumetric={!lowPower && (fixture % 2 === 0 || fixture === 5)}
+        penumbra={0.82}
+        distance={11.5}
+        angle={0.34}
+        attenuation={4.2}
+        anglePower={5.2}
+        opacity={0}
+        shadow-bias={-0.00015}
+        {...props}
+      />
+      {lowPower && (
+        <mesh
+          ref={mobileBeam}
+          frustumCulled={false}
+          renderOrder={2}
+          raycast={() => null}
+        >
+          <cylinderGeometry args={[0.025, 1, 1, 12, 1, true]} />
+          <meshBasicMaterial
+            color={props.color || "white"}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+            blending={THREE.AdditiveBlending}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+    </>
   );
 }
 
@@ -158,15 +218,15 @@ function ClubWash({ audioBus }) {
   useFrame(() => {
     if (cyan.current) {
       cyan.current.intensity =
-        2.4 + audioBus.bass * 3.2 + audioBus.body * 2.4;
+        1.8 + audioBus.lowMid * 3.6 + audioBus.lowMidFlux * 1.4;
     }
     if (magenta.current) {
       magenta.current.intensity =
-        2.1 + audioBus.mid * 2.8 + audioBus.clap * 2.4;
+        1.7 + audioBus.presence * 3.1 + audioBus.clap * 2.2;
     }
     if (violet.current) {
       violet.current.intensity =
-        1.8 + audioBus.body * 2.2 + audioBus.impact * 1.8;
+        1.4 + audioBus.high * 2.4 + audioBus.hat * 2.8;
     }
   });
 
@@ -206,7 +266,7 @@ function DanceFloor({ audioBus, lowPower = false }) {
 
       const ripple = Math.max(
         0,
-        audioBus.body - index * 0.055 + audioBus.impact * 0.22
+        audioBus.sub - index * 0.055 + audioBus.kick * 0.28
       );
       material.opacity = 0.035 + ripple * (0.16 - index * 0.014);
       material.color.offsetHSL(
@@ -250,7 +310,7 @@ function ReactivePostprocessing({ audioBus, lowPower = false }) {
   useFrame(() => {
     if (bloom.current) {
       bloom.current.intensity =
-        0.24 + audioBus.body * 0.18 + audioBus.beat * 0.25;
+        0.22 + audioBus.high * 0.12 + audioBus.hat * 0.2;
     }
   });
 
@@ -484,6 +544,55 @@ function TrackTimeline({ audioBus }) {
   );
 }
 
+const bandRoutes = [
+  { key: "sub", label: "SUB", target: "sphere + floor", color: "#a951ff" },
+  { key: "bass", label: "BASS", target: "speaker cones", color: "#27c9ff" },
+  { key: "lowMid", label: "MID", target: "side racks", color: "#ff357d" },
+  { key: "presence", label: "PRES", target: "wall reactors", color: "#b36bff" },
+  { key: "high", label: "HIGH", target: "spotlights", color: "#f3f6ff" },
+];
+
+function BandRoutingMonitor({ audioBus }) {
+  const [levels, setLevels] = useState(() => bandRoutes.map(() => 0));
+
+  useEffect(() => {
+    const updateLevels = () => {
+      setLevels(
+        bandRoutes.map(({ key }) => {
+          const flux = audioBus[`${key}Flux`] || 0;
+          const transient = key === "high" ? audioBus.hat || 0 : 0;
+          return Math.min(1, Math.max(audioBus[key] || 0, flux, transient));
+        })
+      );
+    };
+
+    updateLevels();
+    const interval = window.setInterval(updateLevels, 90);
+    return () => window.clearInterval(interval);
+  }, [audioBus]);
+
+  return (
+    <div className="music-dock__bands" aria-label="Frequency routing monitor">
+      {bandRoutes.map(({ key, label, target, color }, index) => (
+        <div
+          key={key}
+          className="music-dock__band"
+          title={`${label} → ${target}`}
+          style={{ "--band-color": color }}
+        >
+          <span className="music-dock__band-label">{label}</span>
+          <span className="music-dock__band-track">
+            <span
+              className="music-dock__band-level"
+              style={{ transform: `scaleX(${levels[index]})` }}
+            />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [renderProfile] = useState(() => {
     const compactViewport = window.matchMedia("(max-width: 820px)").matches;
@@ -512,8 +621,27 @@ function App() {
     name: "wae.mp3",
   }));
   const [audioInfo, setAudioInfo] = useState(null);
+  const [tempoBpm, setTempoBpm] = useState(null);
   const { progress } = useProgress();
   const audioBus = useRef(createAudioBus()).current;
+  const tempoOptions = useMemo(() => {
+    if (!audioInfo?.bpm) return [];
+
+    const options = [audioInfo.bpm];
+    if (audioInfo.bpm >= 100) options.push(Math.round(audioInfo.bpm / 2));
+    if (audioInfo.bpm <= 110) options.push(Math.round(audioInfo.bpm * 2));
+    return [...new Set(options)].filter((bpm) => bpm >= 45 && bpm <= 220);
+  }, [audioInfo]);
+  const currentTempoIndex = Math.max(0, tempoOptions.indexOf(tempoBpm));
+  const nextTempo =
+    tempoOptions.length > 1
+      ? tempoOptions[(currentTempoIndex + 1) % tempoOptions.length]
+      : null;
+  const tempoSwitchLabel = nextTempo
+    ? nextTempo < tempoBpm
+      ? `½ ${nextTempo}`
+      : `×2 ${nextTempo}`
+    : null;
   const loadProgress = Math.round(Math.min(Math.max(progress, 0), 100));
   const assetsReady =
     sceneReady && dancersReady && audioReady && loadProgress >= 100;
@@ -523,12 +651,15 @@ function App() {
     : loadProgress >= 100
       ? "ANALYZING AUDIO"
       : `LOADING SCENE · ${loadProgress}%`;
+  const tempoStatus = tempoBpm
+    ? `${tempoBpm} BPM`
+    : null;
   const trackStatus = !musicPlaying
     ? "PAUSED · IDLE MODE"
     : audioInfo?.error
       ? "ANALYSIS FAILED"
-      : audioInfo?.bpm
-        ? `${audioInfo.bpm} BPM`
+      : tempoStatus
+        ? tempoStatus
         : audioInfo
           ? "TEMPO UNAVAILABLE"
           : "ANALYZING TEMPO";
@@ -537,6 +668,7 @@ function App() {
   const handleDancersReady = useCallback(() => setDancersReady(true), []);
   const handleAudioReady = useCallback((analysis) => {
     setAudioInfo(analysis || { error: true });
+    setTempoBpm(analysis?.bpm || null);
     setAudioReady(true);
   }, []);
 
@@ -546,6 +678,7 @@ function App() {
     if (!file) return;
 
     setAudioInfo(null);
+    setTempoBpm(null);
     setMusicPlaying(true);
     setTrack({ path: file, name: file.name });
   }, []);
@@ -553,6 +686,12 @@ function App() {
   const handleStart = () => {
     setMusicPlaying(true);
     setStarted(true);
+  };
+
+  const handleTempoToggle = () => {
+    if (!nextTempo) return;
+    audioBus.bpm = nextTempo;
+    setTempoBpm(nextTempo);
   };
 
   return (
@@ -598,13 +737,27 @@ function App() {
             <span className="music-dock__name" title={track.name}>
               {track.name}
             </span>
-            <span className="music-dock__meta">{trackStatus}</span>
+            <span className="music-dock__meta-row">
+              <span className="music-dock__meta">{trackStatus}</span>
+              {nextTempo && (
+                <button
+                  className="music-dock__tempo-switch"
+                  type="button"
+                  onClick={handleTempoToggle}
+                  title={`Use ${nextTempo < tempoBpm ? "half-time" : "double-time"}: ${nextTempo} BPM`}
+                  aria-label={`Use ${nextTempo < tempoBpm ? "half-time" : "double-time"}: ${nextTempo} BPM`}
+                >
+                  {tempoSwitchLabel}
+                </button>
+              )}
+            </span>
           </div>
           <label className="music-dock__upload">
             LOAD TRACK
             <input type="file" accept="audio/*" onChange={handleTrackUpload} />
           </label>
           <TrackTimeline audioBus={audioBus} />
+          <BandRoutingMonitor audioBus={audioBus} />
         </div>
       )}
 

@@ -51,18 +51,30 @@ export const createAudioBus = () => ({
   impact: 0,
   kick: 0,
   clap: 0,
+  hat: 0,
   body: 0,
+  sub: 0,
   bass: 0,
+  lowMid: 0,
+  presence: 0,
+  high: 0,
   mid: 0,
   treble: 0,
+  subFlux: 0,
+  bassFlux: 0,
+  lowMidFlux: 0,
+  presenceFlux: 0,
+  highFlux: 0,
   beatCount: 0,
   impactCount: 0,
   kickHitCount: 0,
   clapHitCount: 0,
+  hatHitCount: 0,
   bpm: null,
   onsetCount: 0,
   kickCount: 0,
   clapCount: 0,
+  hatCount: 0,
 });
 
 class MusicReactiveEngine {
@@ -74,6 +86,11 @@ class MusicReactiveEngine {
     this.analyser.analyser.smoothingTimeConstant = 0.55;
     this.analyser.analyser.minDecibels = -90;
     this.analyser.analyser.maxDecibels = -18;
+    this.previousFrequencyData = new Uint8Array(
+      this.analyser.analyser.frequencyBinCount
+    );
+    this.bandCalibration = new Map();
+    this.skipFluxFrame = true;
     this.analysis = null;
     this.onsetCursor = 0;
     this.previousSyncPosition = -1;
@@ -90,18 +107,30 @@ class MusicReactiveEngine {
     this.audioBus.onsetCount = 0;
     this.audioBus.kickCount = 0;
     this.audioBus.clapCount = 0;
+    this.audioBus.hatCount = 0;
     this.audioBus.beatCount = 0;
     this.audioBus.impactCount = 0;
     this.audioBus.kickHitCount = 0;
     this.audioBus.clapHitCount = 0;
+    this.audioBus.hatHitCount = 0;
     this.audioBus.beat = 0;
     this.audioBus.impact = 0;
     this.audioBus.kick = 0;
     this.audioBus.clap = 0;
+    this.audioBus.hat = 0;
     this.audioBus.body = 0;
+    this.audioBus.sub = 0;
     this.audioBus.bass = 0;
+    this.audioBus.lowMid = 0;
+    this.audioBus.presence = 0;
+    this.audioBus.high = 0;
     this.audioBus.mid = 0;
     this.audioBus.treble = 0;
+    this.audioBus.subFlux = 0;
+    this.audioBus.bassFlux = 0;
+    this.audioBus.lowMidFlux = 0;
+    this.audioBus.presenceFlux = 0;
+    this.audioBus.highFlux = 0;
     const { buffer, analysis } = await loadAndAnalyzeTrack(path, this.context);
     if (this.disposed) return null;
 
@@ -110,12 +139,16 @@ class MusicReactiveEngine {
     this.audioBus.onsetCount = analysis.onsets.length;
     this.audioBus.kickCount = analysis.kickCount;
     this.audioBus.clapCount = analysis.clapCount;
+    this.audioBus.hatCount = analysis.hatCount;
     this.sound.setBuffer(buffer);
     this.sound.setLoop(true);
     this.sound.setVolume(0.72);
     this.audioBus.position = 0;
     this.audioBus.duration = buffer.duration;
     this.audioBus.status = "ready";
+    this.bandCalibration.clear();
+    this.previousFrequencyData.fill(0);
+    this.skipFluxFrame = true;
 
     return analysis;
   }
@@ -127,6 +160,7 @@ class MusicReactiveEngine {
     if (this.disposed || this.sound.isPlaying) return;
 
     this.sound.play();
+    this.skipFluxFrame = true;
     this.audioBus.isPlaying = true;
     this.audioBus.status = "playing";
   }
@@ -158,7 +192,13 @@ class MusicReactiveEngine {
     this.audioBus.impact = 0;
     this.audioBus.kick = 0;
     this.audioBus.clap = 0;
+    this.audioBus.hat = 0;
     this.audioBus.body = 0;
+    this.audioBus.subFlux = 0;
+    this.audioBus.bassFlux = 0;
+    this.audioBus.lowMidFlux = 0;
+    this.audioBus.presenceFlux = 0;
+    this.audioBus.highFlux = 0;
 
     const syncPosition = nextPosition + VISUAL_LEAD_SECONDS;
     const cursorPosition = Math.min(syncPosition, duration);
@@ -175,16 +215,31 @@ class MusicReactiveEngine {
     this.onsetCursor = low;
     this.previousSyncPosition = syncPosition;
     this.lastComfortFlash = syncPosition;
+    let kickHits = 0;
+    let clapHits = 0;
+    let hatHits = 0;
+
+    for (let index = 0; index < low; index += 1) {
+      const type = onsets[index].type;
+      if (type === "kick" || type === "both") kickHits += 1;
+      if (type === "clap" || type === "both") clapHits += 1;
+      if (type === "hat") hatHits += 1;
+    }
+
+    this.audioBus.kickHitCount = kickHits;
+    this.audioBus.clapHitCount = clapHits;
+    this.audioBus.hatHitCount = hatHits;
     this.audioBus.beatCount = this.audioBus.bpm
       ? Math.floor((nextPosition * this.audioBus.bpm) / 60)
       : 0;
     this.audioBus.seekVersion += 1;
+    this.skipFluxFrame = true;
 
     if (wasPlaying) this.sound.play();
     return nextPosition;
   }
 
-  readBand(data, minimumHz, maximumHz) {
+  readBandFeatures(data, minimumHz, maximumHz) {
     const binWidth = this.context.sampleRate / this.analyser.analyser.fftSize;
     const firstBin = Math.max(0, Math.floor(minimumHz / binWidth));
     const lastBin = Math.min(
@@ -192,13 +247,55 @@ class MusicReactiveEngine {
       Math.ceil(maximumHz / binWidth)
     );
     let sumSquares = 0;
+    let fluxSquares = 0;
 
     for (let bin = firstBin; bin <= lastBin; bin += 1) {
       const normalized = data[bin] / 255;
+      const previous = this.previousFrequencyData[bin] / 255;
+      const positiveChange = Math.max(0, normalized - previous);
       sumSquares += normalized * normalized;
+      fluxSquares += positiveChange * positiveChange;
     }
 
-    return Math.sqrt(sumSquares / Math.max(1, lastBin - firstBin + 1));
+    const binCount = Math.max(1, lastBin - firstBin + 1);
+    return {
+      energy: Math.sqrt(sumSquares / binCount),
+      flux: Math.sqrt(fluxSquares / binCount),
+    };
+  }
+
+  normalizeFeature(key, value, delta, initialPeak = 0.08) {
+    let calibration = this.bandCalibration.get(key);
+
+    if (!calibration) {
+      calibration = { floor: 0, peak: Math.max(initialPeak, value) };
+      this.bandCalibration.set(key, calibration);
+    }
+
+    calibration.floor = follow(
+      calibration.floor,
+      value,
+      delta,
+      value < calibration.floor ? 0.65 : 8,
+      value < calibration.floor ? 0.65 : 8
+    );
+    calibration.peak = follow(
+      calibration.peak,
+      value,
+      delta,
+      value > calibration.peak ? 0.06 : 3.8,
+      value > calibration.peak ? 0.06 : 3.8
+    );
+    calibration.peak = Math.max(
+      calibration.peak,
+      calibration.floor + initialPeak * 0.18
+    );
+
+    const normalized = clamp01(
+      (value - calibration.floor) /
+        Math.max(calibration.peak - calibration.floor, 0.0001)
+    );
+    return Math.pow(normalized, 0.82);
   }
 
   getPlaybackPosition() {
@@ -213,13 +310,53 @@ class MusicReactiveEngine {
   }
 
   settle(delta) {
+    this.audioBus.sub = follow(this.audioBus.sub, 0, delta, 0.04, 0.22);
     this.audioBus.bass = follow(this.audioBus.bass, 0, delta, 0.04, 0.18);
+    this.audioBus.lowMid = follow(
+      this.audioBus.lowMid,
+      0,
+      delta,
+      0.05,
+      0.24
+    );
+    this.audioBus.presence = follow(
+      this.audioBus.presence,
+      0,
+      delta,
+      0.045,
+      0.2
+    );
+    this.audioBus.high = follow(this.audioBus.high, 0, delta, 0.025, 0.13);
     this.audioBus.mid = follow(this.audioBus.mid, 0, delta, 0.05, 0.2);
     this.audioBus.treble = follow(this.audioBus.treble, 0, delta, 0.04, 0.16);
+    this.audioBus.subFlux = follow(this.audioBus.subFlux, 0, delta, 0.02, 0.1);
+    this.audioBus.bassFlux = follow(this.audioBus.bassFlux, 0, delta, 0.02, 0.1);
+    this.audioBus.lowMidFlux = follow(
+      this.audioBus.lowMidFlux,
+      0,
+      delta,
+      0.02,
+      0.1
+    );
+    this.audioBus.presenceFlux = follow(
+      this.audioBus.presenceFlux,
+      0,
+      delta,
+      0.02,
+      0.09
+    );
+    this.audioBus.highFlux = follow(
+      this.audioBus.highFlux,
+      0,
+      delta,
+      0.012,
+      0.075
+    );
     this.audioBus.beat *= Math.exp(-delta / 0.16);
     this.audioBus.impact *= Math.exp(-delta / 0.14);
     this.audioBus.kick *= Math.exp(-delta / 0.16);
     this.audioBus.clap *= Math.exp(-delta / 0.12);
+    this.audioBus.hat *= Math.exp(-delta / 0.075);
     this.audioBus.body *= Math.exp(-delta / 0.3);
   }
 
@@ -233,28 +370,35 @@ class MusicReactiveEngine {
       const onset = onsets[this.onsetCursor];
 
       if (onset.time > after) {
-        this.audioBus.impact = Math.max(this.audioBus.impact, onset.strength);
-        this.audioBus.kick = Math.max(
-          this.audioBus.kick,
-          onset.type === "kick" || onset.type === "both" ? onset.strength : 0
-        );
-        this.audioBus.clap = Math.max(
-          this.audioBus.clap,
-          onset.type === "clap" || onset.type === "both" ? onset.strength : 0
-        );
-        if (onset.type === "kick" || onset.type === "both") {
+        const isKick = onset.type === "kick" || onset.type === "both";
+        const isClap = onset.type === "clap" || onset.type === "both";
+        const isHat = onset.type === "hat";
+
+        if (isKick) {
+          this.audioBus.kick = Math.max(this.audioBus.kick, onset.strength);
           this.audioBus.kickHitCount += 1;
         }
-        if (onset.type === "clap" || onset.type === "both") {
+        if (isClap) {
+          this.audioBus.clap = Math.max(this.audioBus.clap, onset.strength);
           this.audioBus.clapHitCount += 1;
         }
-        this.audioBus.body = Math.max(
-          this.audioBus.body,
-          0.38 + onset.strength * 0.5
-        );
-        this.audioBus.impactCount += 1;
+        if (isHat) {
+          this.audioBus.hat = Math.max(this.audioBus.hat, onset.strength);
+          this.audioBus.highFlux = Math.max(
+            this.audioBus.highFlux,
+            onset.strength * 0.82
+          );
+          this.audioBus.hatHitCount += 1;
+        } else {
+          this.audioBus.impact = Math.max(this.audioBus.impact, onset.strength);
+          this.audioBus.body = Math.max(
+            this.audioBus.body,
+            0.38 + onset.strength * 0.5
+          );
+          this.audioBus.impactCount += 1;
+        }
 
-        if (onset.time - this.lastComfortFlash >= 0.24) {
+        if (!isHat && onset.time - this.lastComfortFlash >= 0.24) {
           this.audioBus.beat = Math.max(
             this.audioBus.beat,
             0.34 + onset.strength * 0.36
@@ -278,39 +422,109 @@ class MusicReactiveEngine {
     }
 
     const data = this.analyser.getFrequencyData();
-    const rawBass = this.readBand(data, 40, 180);
-    const rawMid = this.readBand(data, 180, 2200);
-    const rawTreble = this.readBand(data, 2200, 12000);
-    const bassTarget = clamp01(Math.pow(rawBass, 1.65));
-    const midTarget = clamp01(Math.pow(rawMid, 1.72));
-    const trebleTarget = clamp01(Math.pow(rawTreble, 1.62));
+    const features = {
+      sub: this.readBandFeatures(data, 25, 80),
+      bass: this.readBandFeatures(data, 80, 200),
+      lowMid: this.readBandFeatures(data, 200, 700),
+      presence: this.readBandFeatures(data, 700, 4000),
+      high: this.readBandFeatures(data, 4000, 12000),
+    };
 
+    if (this.skipFluxFrame) {
+      Object.values(features).forEach((feature) => {
+        feature.flux = 0;
+      });
+      this.skipFluxFrame = false;
+    }
+
+    const targets = {};
+    Object.entries(features).forEach(([name, feature]) => {
+      targets[name] = this.normalizeFeature(name, feature.energy, delta, 0.08);
+      targets[`${name}Flux`] = this.normalizeFeature(
+        `${name}Flux`,
+        feature.flux,
+        delta,
+        0.018
+      );
+    });
+    this.previousFrequencyData.set(data);
+
+    this.audioBus.sub = follow(
+      this.audioBus.sub,
+      targets.sub,
+      delta,
+      0.03,
+      0.22
+    );
     this.audioBus.bass = follow(
       this.audioBus.bass,
-      bassTarget,
+      targets.bass,
       delta,
       0.035,
       0.2
     );
-    this.audioBus.mid = follow(
-      this.audioBus.mid,
-      midTarget,
+    this.audioBus.lowMid = follow(
+      this.audioBus.lowMid,
+      targets.lowMid,
       delta,
-      0.055,
-      0.26
+      0.05,
+      0.25
     );
-    this.audioBus.treble = follow(
-      this.audioBus.treble,
-      trebleTarget,
+    this.audioBus.presence = follow(
+      this.audioBus.presence,
+      targets.presence,
       delta,
-      0.025,
-      0.14
+      0.04,
+      0.2
     );
+    this.audioBus.high = follow(
+      this.audioBus.high,
+      targets.high,
+      delta,
+      0.018,
+      0.12
+    );
+    this.audioBus.subFlux = follow(
+      this.audioBus.subFlux,
+      targets.subFlux,
+      delta,
+      0.012,
+      0.09
+    );
+    this.audioBus.bassFlux = follow(
+      this.audioBus.bassFlux,
+      targets.bassFlux,
+      delta,
+      0.014,
+      0.1
+    );
+    this.audioBus.lowMidFlux = follow(
+      this.audioBus.lowMidFlux,
+      targets.lowMidFlux,
+      delta,
+      0.016,
+      0.11
+    );
+    this.audioBus.presenceFlux = follow(
+      this.audioBus.presenceFlux,
+      targets.presenceFlux,
+      delta,
+      0.012,
+      0.09
+    );
+    this.audioBus.highFlux = Math.max(
+      this.audioBus.highFlux * Math.exp(-delta / 0.085),
+      targets.highFlux
+    );
+    this.audioBus.mid =
+      this.audioBus.lowMid * 0.68 + this.audioBus.presence * 0.32;
+    this.audioBus.treble = this.audioBus.high;
 
     this.audioBus.beat *= Math.exp(-delta / 0.2);
     this.audioBus.impact *= Math.exp(-delta / 0.15);
     this.audioBus.kick *= Math.exp(-delta / 0.18);
     this.audioBus.clap *= Math.exp(-delta / 0.12);
+    this.audioBus.hat *= Math.exp(-delta / 0.075);
     this.audioBus.body *= Math.exp(-delta / 0.42);
 
     const duration = this.analysis.duration;
@@ -359,7 +573,7 @@ export const AudioVisualizer = ({
   const engineRef = useRef(null);
   const shouldPlayRef = useRef(shouldPlay);
   const visualTime = useRef(0);
-  const [status, setStatus] = useState("ANALYZING KICK + CLAP");
+  const [status, setStatus] = useState("ANALYZING 5-BAND AUDIO");
 
   const uniforms = useMemo(
     () => ({
@@ -416,7 +630,7 @@ export const AudioVisualizer = ({
         setStatus(
           `${analysis.bpm ? `${analysis.bpm} BPM · ` : ""}${
             analysis.kickCount
-          } KICKS · ${analysis.clapCount} CLAPS`
+          } KICKS · ${analysis.clapCount} CLAPS · ${analysis.hatCount} HIGHS`
         );
         onReady?.(analysis);
         window.setTimeout(
@@ -449,23 +663,22 @@ export const AudioVisualizer = ({
 
     if (audioBus.isPlaying) visualTime.current += delta;
     uniforms.uTime.value = visualTime.current;
-    uniforms.uAudioFrequency.value =
-      audioBus.bass * 0.34 + audioBus.mid * 0.14;
-    uniforms.uBeat.value = Math.max(audioBus.impact, audioBus.body * 0.42);
+    uniforms.uAudioFrequency.value = audioBus.sub * 0.48;
+    uniforms.uBeat.value = Math.max(audioBus.kick, audioBus.subFlux * 0.58);
 
     if (sphereRef.current) {
       const scale =
-        0.7 * (1 + audioBus.body * 0.1 + audioBus.impact * 0.055);
+        0.7 * (1 + audioBus.sub * 0.085 + audioBus.kick * 0.07);
       sphereRef.current.scale.setScalar(scale);
       if (audioBus.isPlaying) {
         sphereRef.current.rotation.y +=
-          delta * (0.08 + audioBus.treble * 0.12);
+          delta * (0.08 + audioBus.sub * 0.055);
       }
     }
 
     if (lightRef.current) {
       lightRef.current.intensity =
-        3 + audioBus.bass * 7 + audioBus.body * 7 + audioBus.beat * 18;
+        2.4 + audioBus.sub * 10 + audioBus.kick * 14;
     }
   });
 

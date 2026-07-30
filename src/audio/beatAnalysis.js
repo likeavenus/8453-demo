@@ -181,36 +181,73 @@ const mergePercussion = (kickOnsets, clapOnsets) => {
 };
 
 const estimateTempo = (onsets) => {
-  if (onsets.length < 4) return null;
-
-  const histogram = new Float32Array(161);
-
-  for (let index = 1; index < onsets.length; index += 1) {
-    const interval = onsets[index].time - onsets[index - 1].time;
-    if (interval <= 0 || interval > 2) continue;
-
-    let bpm = 60 / interval;
-    while (bpm < 80) bpm *= 2;
-    while (bpm > 160) bpm /= 2;
-    histogram[Math.round(bpm)] += onsets[index].strength;
+  if (onsets.length < 4) {
+    return { bpm: null, confidence: 0, candidates: [], doubleTimeBpm: null };
   }
 
-  let bestBin = 0;
-  let bestScore = 0;
+  const minimumBpm = 55;
+  const maximumBpm = 190;
+  const histogram = new Float32Array(maximumBpm + 1);
 
-  for (let bpm = 80; bpm <= 160; bpm += 1) {
+  for (let index = 0; index < onsets.length - 1; index += 1) {
+    for (
+      let nextIndex = index + 1;
+      nextIndex < Math.min(onsets.length, index + 7);
+      nextIndex += 1
+    ) {
+      const interval = onsets[nextIndex].time - onsets[index].time;
+      if (interval <= 0.24) continue;
+      if (interval > 2.2) break;
+
+      let bpm = 60 / interval;
+      while (bpm < minimumBpm) bpm *= 2;
+      while (bpm > maximumBpm) bpm /= 2;
+
+      const distance = nextIndex - index;
+      const strength = Math.sqrt(
+        onsets[index].strength * onsets[nextIndex].strength
+      );
+      const distanceWeight = 1 / Math.pow(distance, 0.58);
+      histogram[Math.round(bpm)] += strength * distanceWeight;
+    }
+  }
+
+  const candidates = [];
+
+  for (let bpm = minimumBpm; bpm <= maximumBpm; bpm += 1) {
     const score =
       histogram[bpm] +
       (histogram[bpm - 1] || 0) * 0.5 +
       (histogram[bpm + 1] || 0) * 0.5;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestBin = bpm;
-    }
+    const metricalPrior = bpm < 96 ? 1.06 : bpm > 165 ? 0.94 : 1;
+    candidates.push({ bpm, score: score * metricalPrior });
   }
 
-  return bestBin || null;
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || best.score <= 0) {
+    return { bpm: null, confidence: 0, candidates: [], doubleTimeBpm: null };
+  }
+  const alternatives = candidates.filter(
+    (candidate) =>
+      Math.abs(candidate.bpm - best.bpm) > 3 &&
+      Math.abs(candidate.bpm * 2 - best.bpm) > 3 &&
+      Math.abs(best.bpm * 2 - candidate.bpm) > 3
+  );
+  const secondScore = alternatives[0]?.score || 0;
+  const confidence = best.score
+    ? clamp((best.score - secondScore) / best.score, 0, 1)
+    : 0;
+
+  return {
+    bpm: best.bpm || null,
+    confidence,
+    candidates: candidates.slice(0, 5).map(({ bpm, score }) => ({
+      bpm,
+      score: best.score ? score / best.score : 0,
+    })),
+    doubleTimeBpm: best.bpm && best.bpm * 2 <= 220 ? best.bpm * 2 : null,
+  };
 };
 
 export const analyzePercussionOnsets = async (audioBuffer) => {
@@ -235,13 +272,31 @@ export const analyzePercussionOnsets = async (audioBuffer) => {
       strengthScale: 0.88,
     }),
   ]);
-  const onsets = mergePercussion(kickOnsets, clapOnsets);
+  const hatOnsets = await detectBandOnsets(audioBuffer, {
+    type: "hat",
+    minimumHz: 4000,
+    maximumHz: 12000,
+    frameSize: 256,
+    sensitivity: 1.48,
+    energyQuantile: 0.48,
+    minimumInterval: 0.065,
+    strengthScale: 0.72,
+  });
+  const onsets = [
+    ...mergePercussion(kickOnsets, clapOnsets),
+    ...hatOnsets,
+  ].sort((a, b) => a.time - b.time);
+  const tempo = estimateTempo(kickOnsets);
 
   return {
     duration: audioBuffer.duration,
-    bpm: estimateTempo(kickOnsets),
+    bpm: tempo.bpm,
+    bpmConfidence: tempo.confidence,
+    bpmCandidates: tempo.candidates,
+    doubleTimeBpm: tempo.doubleTimeBpm,
     kickCount: kickOnsets.length,
     clapCount: clapOnsets.length,
+    hatCount: hatOnsets.length,
     onsets,
   };
 };
