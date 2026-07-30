@@ -5,7 +5,7 @@ import url from "/video/swag.mp4";
 
 export const TV = ({
   audioBus,
-  position = [0, 4.6, -4.04],
+  position = [0, 4.1, -4.04],
   rotation = [0, 0, 0],
   scale = 1,
   screenSize = [5.2, 2.1],
@@ -62,7 +62,7 @@ export const TV = ({
 
   const bezel = 0.14;
   const frontZ = 0.08;
-  const supportY = height * 0.5 + 0.46;
+  const supportY = height * 0.5 + 0.24;
 
   return (
     <group position={position} rotation={rotation} scale={scale}>
@@ -119,11 +119,11 @@ export const TV = ({
 
       {[-width * 0.31, width * 0.31].map((x) => (
         <mesh key={x} position={[x, supportY, -0.02]} castShadow>
-          <boxGeometry args={[0.1, 0.72, 0.13]} />
+          <boxGeometry args={[0.1, 0.34, 0.13]} />
           <meshStandardMaterial color="#1b1d27" metalness={0.9} roughness={0.25} />
         </mesh>
       ))}
-      <mesh position={[0, height * 0.5 + 0.82, -0.02]} castShadow>
+      <mesh position={[0, height * 0.5 + 0.42, -0.02]} castShadow>
         <boxGeometry args={[width + 0.92, 0.13, 0.17]} />
         <meshStandardMaterial color="#1b1d27" metalness={0.92} roughness={0.24} />
       </mesh>

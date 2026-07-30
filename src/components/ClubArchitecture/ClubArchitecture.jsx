@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const createBrush = (geometry, position = [0, 0, 0], rotation = [0, 0, 0]) => {
   geometry.clearGroups();
@@ -75,7 +76,21 @@ const createSideWall = () =>
     ),
   ]);
 
+const createRotor = () => {
+  const blades = Array.from({ length: 6 }, (_, index) => {
+    const blade = new THREE.BoxGeometry(0.11, 0.38, 0.035);
+    blade.translate(0, 0.29, 0);
+    blade.rotateZ((index / 6) * Math.PI * 2 + 0.38);
+    return blade;
+  });
+  const geometry = mergeGeometries(blades, false);
+  blades.forEach((blade) => blade.dispose());
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
 const bars = Array.from({ length: 8 }, (_, index) => index);
+const stageSegments = Array.from({ length: 12 }, (_, index) => index);
 const speakerDrivers = [
   { y: 0.72, radius: 0.435 },
   { y: -0.31, radius: 0.325 },
@@ -101,6 +116,7 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
   const wallGeometry = useMemo(createClubWall, []);
   const speakerGeometry = useMemo(createSpeakerCabinet, []);
   const sideWallGeometry = useMemo(createSideWall, []);
+  const rotorGeometry = useMemo(createRotor, []);
   const portal = useRef(null);
   const portalCore = useRef(null);
   const lightBars = useRef([]);
@@ -109,17 +125,20 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
   const sideRings = useRef([]);
   const ceilingBars = useRef([]);
   const ventLights = useRef([]);
+  const sideRotors = useRef([]);
+  const stageMeters = useRef([]);
 
   useEffect(
     () => () => {
       wallGeometry.dispose();
       speakerGeometry.dispose();
       sideWallGeometry.dispose();
+      rotorGeometry.dispose();
     },
-    [sideWallGeometry, speakerGeometry, wallGeometry]
+    [rotorGeometry, sideWallGeometry, speakerGeometry, wallGeometry]
   );
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (portal.current) {
       portal.current.emissiveIntensity =
         0.42 + audioBus.body * 0.55 + audioBus.kick * 0.45;
@@ -186,6 +205,46 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
         audioBus.bass * 0.1 +
         (alternatingAccent ? audioBus.clap * 0.3 : 0);
     });
+
+    sideRotors.current.forEach((rotor, index) => {
+      if (!rotor) return;
+
+      if (audioBus.isPlaying) {
+        const direction = index % 2 === 0 ? 1 : -1;
+        rotor.rotation.z +=
+          delta * direction * (0.2 + audioBus.bass * 0.75 + audioBus.body * 0.3);
+      }
+
+      const targetScale = 1 + audioBus.kick * 0.035;
+      const scale = THREE.MathUtils.damp(
+        rotor.scale.x,
+        targetScale,
+        targetScale > rotor.scale.x ? 14 : 7,
+        delta
+      );
+      rotor.scale.setScalar(scale);
+    });
+
+    stageMeters.current.forEach((meter, index) => {
+      if (!meter) return;
+
+      const band =
+        index % 3 === 0
+          ? audioBus.bass
+          : index % 3 === 1
+            ? audioBus.mid
+            : audioBus.treble;
+      const chase = index === audioBus.beatCount % stageSegments.length ? 1 : 0;
+      const targetScale = 0.42 + band * 1.25 + audioBus.kick * 0.34;
+      meter.scale.y = THREE.MathUtils.damp(
+        meter.scale.y,
+        targetScale,
+        targetScale > meter.scale.y ? 16 : 7,
+        delta
+      );
+      meter.material.emissiveIntensity =
+        0.08 + band * 0.42 + chase * audioBus.beat * 0.55;
+    });
   });
 
   return (
@@ -225,22 +284,29 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
         />
       </mesh>
 
-      <group position={[-3.75, 1.44, -4.1]}>
-        {bars.map((index) => (
-          <mesh key={index} position={[0, -1.14 + index * 0.325, 0]}>
-            <boxGeometry args={[1.72, 0.075, 0.07]} />
-            <meshStandardMaterial
-              ref={(material) => {
-                lightBars.current[index] = material;
-              }}
-              color={index % 2 === 0 ? "#29bfff" : "#ff2a75"}
-              emissive={index % 2 === 0 ? "#29bfff" : "#ff2a75"}
-              emissiveIntensity={0.22}
-              toneMapped={false}
-            />
-          </mesh>
-        ))}
-      </group>
+      {[-3.75, 3.75].map((x, rackIndex) => (
+        <group key={x} position={[x, 1.44, -4.1]}>
+          {bars.map((index) => {
+            const materialIndex = rackIndex * bars.length + index;
+            const isCyan = (index + rackIndex) % 2 === 0;
+
+            return (
+              <mesh key={index} position={[0, -1.14 + index * 0.325, 0]}>
+                <boxGeometry args={[1.72, 0.075, 0.07]} />
+                <meshStandardMaterial
+                  ref={(material) => {
+                    lightBars.current[materialIndex] = material;
+                  }}
+                  color={isCyan ? "#29bfff" : "#ff2a75"}
+                  emissive={isCyan ? "#29bfff" : "#ff2a75"}
+                  emissiveIntensity={0.22}
+                  toneMapped={false}
+                />
+              </mesh>
+            );
+          })}
+        </group>
+      ))}
 
       <mesh position={[0, -0.68, -3.52]} castShadow receiveShadow>
         <boxGeometry args={[5.5, 0.58, 1.35]} />
@@ -259,6 +325,34 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
           toneMapped={false}
         />
       </mesh>
+
+      <group position={[0, -0.67, -2.83]}>
+        {stageSegments.map((index) => {
+          const colors = ["#27c9ff", "#f2edf9", "#ff357d"];
+          const color = colors[index % colors.length];
+
+          return (
+            <mesh
+              key={index}
+              ref={(mesh) => {
+                stageMeters.current[index] = mesh;
+              }}
+              position={[-2.28 + index * 0.415, 0, 0]}
+              scale-y={0.42}
+            >
+              <boxGeometry args={[0.24, 0.22, 0.025]} />
+              <meshStandardMaterial
+                color={color}
+                emissive={color}
+                emissiveIntensity={0.08}
+                metalness={0.35}
+                roughness={0.28}
+                toneMapped={false}
+              />
+            </mesh>
+          );
+        })}
+      </group>
 
       {[-1, 1].map((side, sideIndex) => (
         <group key={`speaker-${side}`} position={[side * 5.08, 0.66, -3.83]}>
@@ -380,6 +474,40 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
                     side={THREE.DoubleSide}
                   />
                 </mesh>
+                <group
+                  ref={(group) => {
+                    sideRotors.current[refIndex] = group;
+                  }}
+                  position={[0, 0, side * 0.024]}
+                >
+                  <mesh geometry={rotorGeometry}>
+                    <meshStandardMaterial
+                      color="#282933"
+                      metalness={0.86}
+                      roughness={0.32}
+                      side={THREE.DoubleSide}
+                    />
+                  </mesh>
+                  <mesh position={[0, 0, 0.025]}>
+                    <circleGeometry args={[0.135, 32]} />
+                    <meshStandardMaterial
+                      color="#111219"
+                      emissive={color}
+                      emissiveIntensity={0.08}
+                      metalness={0.72}
+                      roughness={0.26}
+                      side={THREE.DoubleSide}
+                    />
+                  </mesh>
+                  <mesh position={[0, 0, 0.032]}>
+                    <torusGeometry args={[0.17, 0.018, 8, 32]} />
+                    <meshStandardMaterial
+                      color="#777986"
+                      metalness={0.9}
+                      roughness={0.22}
+                    />
+                  </mesh>
+                </group>
                 <mesh>
                   <torusGeometry args={[0.76, 0.035, 12, 56]} />
                   <meshStandardMaterial
@@ -424,6 +552,43 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
                     />
                   </mesh>
                 ))}
+              </group>
+            );
+          })}
+
+          <mesh position={[side * 5.55, 2.25, -0.35]} castShadow>
+            <boxGeometry args={[0.055, 0.075, 4.35]} />
+            <meshStandardMaterial
+              color="#393a45"
+              metalness={0.9}
+              roughness={0.25}
+            />
+          </mesh>
+          {sideOpenings.map((z, openingIndex) => {
+            const color =
+              (openingIndex + sideIndex) % 2 === 0 ? "#26c9ff" : "#ff317c";
+
+            return (
+              <group key={`conduit-${z}`}>
+                <mesh position={[side * 5.55, 1.76, -0.35 + z]} castShadow>
+                  <boxGeometry args={[0.055, 0.92, 0.05]} />
+                  <meshStandardMaterial
+                    color="#33343e"
+                    metalness={0.88}
+                    roughness={0.28}
+                  />
+                </mesh>
+                <mesh position={[side * 5.52, 2.25, -0.35 + z]}>
+                  <boxGeometry args={[0.075, 0.18, 0.26]} />
+                  <meshStandardMaterial
+                    color={color}
+                    emissive={color}
+                    emissiveIntensity={0.06}
+                    metalness={0.58}
+                    roughness={0.3}
+                    toneMapped={false}
+                  />
+                </mesh>
               </group>
             );
           })}

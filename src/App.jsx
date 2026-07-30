@@ -285,13 +285,13 @@ function ClubFloor({ lowPower = false }) {
         <MeshReflectorMaterial
           color="#090910"
           resolution={256}
-          mirror={0.2}
-          mixStrength={0.56}
+          mirror={0.4}
+          mixStrength={0.68}
           mixContrast={1.06}
           blur={[144, 48]}
           mixBlur={1.05}
           metalness={0.72}
-          roughness={0.58}
+          roughness={0.54}
           depthScale={0.26}
           minDepthThreshold={0.34}
           maxDepthThreshold={1.18}
@@ -336,7 +336,7 @@ function SceneThree({
       <Suspense fallback={null}>
         <TV
           audioBus={audioBus}
-          position={[0, 4.6, -4.04]}
+          position={[0, 4.1, -4.04]}
           rotation={[0, 0, 0]}
           scale={1}
           screenSize={[5.2, 2.1]}
