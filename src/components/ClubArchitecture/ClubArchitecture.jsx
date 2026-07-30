@@ -70,7 +70,9 @@ export function ClubArchitecture({ audioBus }) {
         0.5 +
         0.5 * Math.sin(state.clock.elapsedTime * 1.15 + index * 0.72);
       material.emissiveIntensity =
-        0.18 + wave * 0.28 + audioBus.clap * (0.35 + index * 0.025);
+        0.14 +
+        (audioBus.isPlaying ? wave * 0.28 : 0.025) +
+        audioBus.clap * (0.35 + index * 0.025);
     });
   });
 

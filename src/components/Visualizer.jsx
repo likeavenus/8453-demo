@@ -16,23 +16,28 @@ const follow = (current, target, delta, attack, release) => {
   return current + (target - current) * (1 - Math.exp(-delta / time));
 };
 
-const loadAndAnalyzeTrack = (path, context) => {
-  if (!trackCache.has(path)) {
-    const promise = new THREE.AudioLoader()
-      .loadAsync(path)
+const loadAndAnalyzeTrack = (source, context) => {
+  if (!trackCache.has(source)) {
+    const loadBuffer =
+      source instanceof Blob
+        ? source
+            .arrayBuffer()
+            .then((arrayBuffer) => context.decodeAudioData(arrayBuffer))
+        : new THREE.AudioLoader().loadAsync(source);
+    const promise = loadBuffer
       .then(async (buffer) => ({
         buffer,
         analysis: await analyzePercussionOnsets(buffer),
       }))
       .catch((error) => {
-        trackCache.delete(path);
+        trackCache.delete(source);
         throw error;
       });
 
-    trackCache.set(path, promise);
+    trackCache.set(source, promise);
   }
 
-  return trackCache.get(path);
+  return trackCache.get(source);
 };
 
 export const createAudioBus = () => ({
@@ -76,8 +81,23 @@ class MusicReactiveEngine {
   async load(path) {
     this.audioBus.status = "analyzing";
     this.audioBus.isPlaying = false;
-    await this.context.resume();
-
+    this.audioBus.bpm = null;
+    this.audioBus.position = 0;
+    this.audioBus.onsetCount = 0;
+    this.audioBus.kickCount = 0;
+    this.audioBus.clapCount = 0;
+    this.audioBus.beatCount = 0;
+    this.audioBus.impactCount = 0;
+    this.audioBus.kickHitCount = 0;
+    this.audioBus.clapHitCount = 0;
+    this.audioBus.beat = 0;
+    this.audioBus.impact = 0;
+    this.audioBus.kick = 0;
+    this.audioBus.clap = 0;
+    this.audioBus.body = 0;
+    this.audioBus.bass = 0;
+    this.audioBus.mid = 0;
+    this.audioBus.treble = 0;
     const { buffer, analysis } = await loadAndAnalyzeTrack(path, this.context);
     if (this.disposed) return null;
 
@@ -279,12 +299,14 @@ export const AudioVisualizer = ({
   audioBus,
   onReady,
   shouldPlay = true,
+  showStatus = true,
 }) => {
   const camera = useThree((state) => state.camera);
   const sphereRef = useRef(null);
   const lightRef = useRef(null);
   const engineRef = useRef(null);
   const shouldPlayRef = useRef(shouldPlay);
+  const visualTime = useRef(0);
   const [status, setStatus] = useState("ANALYZING KICK + CLAP");
 
   const uniforms = useMemo(
@@ -363,14 +385,15 @@ export const AudioVisualizer = ({
       engine.dispose();
       camera.remove(listener);
       engineRef.current = null;
-      if (path.startsWith("blob:")) trackCache.delete(path);
+      if (path instanceof Blob) trackCache.delete(path);
     };
   }, [audioBus, camera, onReady, path]);
 
   useFrame((state, delta) => {
     engineRef.current?.update(Math.min(delta, 0.1));
 
-    uniforms.uTime.value = state.clock.getElapsedTime();
+    if (audioBus.isPlaying) visualTime.current += delta;
+    uniforms.uTime.value = visualTime.current;
     uniforms.uAudioFrequency.value =
       audioBus.bass * 0.34 + audioBus.mid * 0.14;
     uniforms.uBeat.value = Math.max(audioBus.impact, audioBus.body * 0.42);
@@ -379,7 +402,10 @@ export const AudioVisualizer = ({
       const scale =
         0.7 * (1 + audioBus.body * 0.1 + audioBus.impact * 0.055);
       sphereRef.current.scale.setScalar(scale);
-      sphereRef.current.rotation.y += delta * (0.08 + audioBus.treble * 0.12);
+      if (audioBus.isPlaying) {
+        sphereRef.current.rotation.y +=
+          delta * (0.08 + audioBus.treble * 0.12);
+      }
     }
 
     if (lightRef.current) {
@@ -390,7 +416,7 @@ export const AudioVisualizer = ({
 
   return (
     <group>
-      {status && (
+      {showStatus && status && (
         <Html center position={[0, 3.25, 0]}>
           <div className="audio-status">{status}</div>
         </Html>

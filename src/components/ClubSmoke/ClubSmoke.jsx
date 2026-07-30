@@ -14,7 +14,7 @@ export function ClubSmoke({ audioBus }) {
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uDensity: { value: 0.72 },
+      uDensity: { value: 0.44 },
       uBeat: { value: 0 },
       uCameraLocal: { value: new THREE.Vector3() },
     }),
@@ -33,7 +33,7 @@ export function ClubSmoke({ audioBus }) {
     values.uCameraLocal.value.copy(cameraLocal);
     values.uDensity.value = THREE.MathUtils.damp(
       values.uDensity.value,
-      0.68 + audioBus.body * 0.12,
+      0.42 + audioBus.body * 0.055,
       2.2,
       delta
     );

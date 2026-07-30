@@ -36,6 +36,111 @@ button {
 
 .stage-shell canvas {
   display: block;
+  transform: scale(1);
+  transform-origin: center;
+  transition:
+    filter 1.1s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 1.1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stage-shell--preview canvas {
+  filter: blur(12px) brightness(0.56) saturate(0.72);
+  transform: scale(1.045);
+}
+
+.music-dock {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: 42px minmax(120px, 210px) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  background: rgba(7, 7, 12, 0.7);
+  box-shadow:
+    0 14px 48px rgba(0, 0, 0, 0.38),
+    inset 0 1px rgba(255, 255, 255, 0.045);
+  backdrop-filter: blur(16px);
+}
+
+.music-dock__transport,
+.music-dock__upload {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.055);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.music-dock__transport:hover,
+.music-dock__upload:hover {
+  border-color: rgba(184, 102, 255, 0.75);
+  background: rgba(155, 70, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.music-dock__transport {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  padding: 0;
+  border-radius: 13px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.music-dock__track {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.music-dock__name,
+.music-dock__meta,
+.music-dock__upload {
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.music-dock__name {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 10px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-dock__meta {
+  color: rgba(204, 179, 231, 0.52);
+  font-size: 7px;
+  font-weight: 700;
+}
+
+.music-dock__upload {
+  padding: 10px 12px;
+  border-radius: 11px;
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.music-dock__upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .scene-curtain {
@@ -110,7 +215,9 @@ button {
 }
 
 .landing {
-  position: relative;
+  position: absolute;
+  inset: 0;
+  z-index: 30;
   display: grid;
   min-height: 100%;
   place-content: center;
@@ -122,7 +229,18 @@ button {
     radial-gradient(circle at 50% 42%, rgba(112, 40, 190, 0.32), transparent 28%),
     radial-gradient(circle at 12% 90%, rgba(0, 182, 255, 0.18), transparent 34%),
     radial-gradient(circle at 88% 8%, rgba(255, 20, 91, 0.16), transparent 30%),
-    #09090d;
+    rgba(5, 5, 9, 0.42);
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 720ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 720ms;
+}
+
+.landing--hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .landing::before,
@@ -178,7 +296,7 @@ button {
 }
 
 .landing__title {
-  margin: 0 0 38px;
+  margin: 0 0 28px;
   color: #fff;
   font-size: clamp(52px, 10vw, 148px);
   font-weight: 900;
@@ -187,6 +305,42 @@ button {
   text-shadow:
     0 0 38px rgba(177, 60, 255, 0.22),
     0 0 92px rgba(23, 185, 255, 0.12);
+}
+
+.landing__loader {
+  display: grid;
+  width: min(310px, 72vw);
+  gap: 8px;
+  margin: 0 0 22px;
+}
+
+.landing__loader-track {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 22px rgba(117, 58, 255, 0.12);
+}
+
+.landing__loader-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #23caff, #aa50ff 58%, #ff3e82);
+  box-shadow:
+    0 0 10px rgba(44, 201, 255, 0.58),
+    0 0 24px rgba(171, 71, 255, 0.36);
+  transition: width 320ms ease;
+}
+
+.landing__loader-label {
+  color: rgba(232, 218, 255, 0.52);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.22em;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .start_btn {
@@ -249,6 +403,13 @@ button {
   .landing__title {
     margin-bottom: 30px;
   }
+
+  .music-dock {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -262,5 +423,11 @@ button {
 
   .scene-curtain__beam {
     animation: none;
+  }
+
+  .stage-shell canvas,
+  .landing,
+  .landing__loader-progress {
+    transition-duration: 0ms;
   }
 }

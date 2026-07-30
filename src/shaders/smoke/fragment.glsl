@@ -83,11 +83,36 @@ float smokeDensity(vec3 point) {
     clubPoint * 0.78 +
     vec3(broadNoise * 1.35, -time * 0.7, broadNoise * 0.82)
   );
+  float bankNoise = fbm(
+    clubPoint * 0.2 + vec3(-time * 0.26, time * 0.08, time * 0.2)
+  );
 
   float height = point.y + 0.5;
   float floorLayer = 1.0 - smoothstep(0.04, 0.88, height);
   float suspendedHaze = 1.0 - smoothstep(0.18, 1.0, height);
   float wisps = smoothstep(0.46, 0.78, broadNoise * 0.62 + curledNoise * 0.58);
+
+  float sideBanks = smoothstep(0.2, 0.48, abs(point.x));
+  float rearBank = smoothstep(0.02, 0.47, -point.z);
+  float perimeterBank = max(sideBanks, rearBank * 0.62);
+  float openDanceFloor = mix(0.12, 1.0, perimeterBank);
+  float brokenClouds = mix(
+    0.24,
+    1.0,
+    smoothstep(0.42, 0.68, bankNoise + perimeterBank * 0.12)
+  );
+
+  float movingOpening = smoothstep(
+    0.16,
+    0.42,
+    length(
+      vec2(
+        point.x - sin(time * 0.65) * 0.07,
+        point.z - 0.08 - cos(time * 0.48) * 0.06
+      )
+    )
+  );
+  float sightline = mix(0.16, 1.0, movingOpening);
 
   float sideFade = smoothstep(0.0, 0.11, 0.5 - abs(point.x));
   float depthFade = smoothstep(0.0, 0.12, 0.5 - abs(point.z));
@@ -96,6 +121,7 @@ float smokeDensity(vec3 point) {
 
   float density = wisps * (floorLayer * 0.82 + suspendedHaze * 0.18);
   density += floorLayer * smoothstep(0.56, 0.82, curledNoise) * 0.28;
+  density *= openDanceFloor * brokenClouds * sightline;
   return density * boundaryFade * uDensity;
 }
 
@@ -138,5 +164,5 @@ void main() {
   if (accumulatedAlpha < 0.002) discard;
 
   vec3 finalColor = accumulatedColor / max(accumulatedAlpha, 0.0001);
-  gl_FragColor = vec4(finalColor, accumulatedAlpha * 0.68);
+  gl_FragColor = vec4(finalColor, accumulatedAlpha * 0.48);
 }

@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, SpotLight, useDepthBuffer } from "@react-three/drei";
+import {
+  MeshReflectorMaterial,
+  OrbitControls,
+  SpotLight,
+  useDepthBuffer,
+  useProgress,
+} from "@react-three/drei";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import {
   Suspense,
@@ -35,52 +41,107 @@ function MovingSpot({
   ...props
 }) {
   const light = useRef(null);
-  const target = useMemo(() => new THREE.Vector3(), []);
+  const beamMaterial = useRef(null);
+  const previousBeat = useRef(-1);
+  const beatTarget = useMemo(() => new THREE.Vector3(), []);
+  const desiredTarget = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((state, delta) => {
     if (!light.current) return;
 
     const time = state.clock.getElapsedTime();
+    const beatNumber = audioBus.beatCount;
+
+    if (beatNumber !== previousBeat.current) {
+      const seed = (beatNumber + 1) * (fixture + 2);
+      beatTarget.set(
+        Math.sin(seed * 12.9898 + phase) * 3.15,
+        -0.78 + Math.sin(seed * 4.173) * 0.18,
+        Math.cos(seed * 7.233 + phase * 0.7) * 2.35
+      );
+      previousBeat.current = beatNumber;
+    }
+
     const sweepX =
-      Math.sin(time * (0.3 + fixture * 0.012) + phase) * 2.65 +
-      Math.sin(time * 0.71 + phase * 0.5) * 0.45;
-    const sweepZ = Math.cos(time * (0.24 + fixture * 0.01) + phase) * 1.85;
-    const sweepY = -0.62 + Math.sin(time * 0.42 + phase) * 0.24;
-    const step = audioBus.beatCount % concertLights.length;
-    const opposite = (step + concertLights.length / 2) % concertLights.length;
+      Math.sin(time * (0.48 + fixture * 0.018) + phase) * 2.8 +
+      Math.sin(time * 0.93 + phase * 0.45) * 0.52;
+    const sweepZ =
+      Math.cos(time * (0.37 + fixture * 0.014) + phase) * 2.05;
+    const sweepY = -0.7 + Math.sin(time * 0.58 + phase) * 0.22;
+    const step = beatNumber % concertLights.length;
+    const opposite = (step + 3) % concertLights.length;
     const isPrimary = fixture === step || fixture === opposite;
+    const isNeighbor =
+      fixture === (step + 1) % concertLights.length ||
+      fixture === (step + 5) % concertLights.length;
     const isClapAccent =
       audioBus.clap > 0.24 && fixture === (step + 2) % concertLights.length;
-    const gate = isPrimary ? 1 : isClapAccent ? 0.56 : 0;
-    const kickLift = audioBus.kick > 0.72 ? audioBus.kick * 4.5 : 0;
-    const desiredIntensity =
-      gate *
-        (intensity * 0.72 + audioBus.body * 5 + audioBus.beat * 18) +
-      kickLift;
+    const pulse = Math.max(
+      audioBus.beat,
+      audioBus.kick * 0.94,
+      audioBus.clap * 0.78
+    );
+    const chaseLevel = isPrimary ? 1 : isNeighbor ? 0.16 : 0;
+    const shimmer = 0.5 + 0.5 * Math.sin(time * 2.15 + phase * 1.7);
+    const desiredIntensity = audioBus.isPlaying
+      ? chaseLevel * (intensity * 0.58 + pulse * 24 + audioBus.body * 4.5) +
+        audioBus.kick * (fixture % 2 === 0 ? 8.5 : 5.5) +
+        (isClapAccent ? audioBus.clap * 14 : 0) +
+        (isPrimary ? shimmer * 1.2 : 0.05)
+      : 0;
+
+    desiredTarget.set(
+      beatTarget.x * 0.68 + sweepX * 0.32,
+      beatTarget.y * 0.72 + sweepY * 0.28,
+      beatTarget.z * 0.68 + sweepZ * 0.32
+    );
 
     light.current.target.position.lerp(
-      target.set(sweepX, sweepY, sweepZ),
-      1 - Math.exp(-delta * 4.6)
+      desiredTarget,
+      1 - Math.exp(-delta * (6.2 + pulse * 8))
     );
     light.current.target.updateMatrixWorld();
     light.current.intensity = THREE.MathUtils.damp(
       light.current.intensity,
       desiredIntensity,
-      isPrimary ? 16 : 8,
+      desiredIntensity > light.current.intensity ? 22 : 10,
       delta
     );
+
+    if (!beamMaterial.current) {
+      light.current.traverse((child) => {
+        if (child.material?.uniforms?.opacity) {
+          beamMaterial.current = child.material;
+        }
+      });
+    }
+
+    if (beamMaterial.current) {
+      const desiredOpacity = audioBus.isPlaying
+        ? 0.018 +
+          chaseLevel * 0.105 +
+          pulse * (isPrimary ? 0.24 : 0.055) +
+          (isClapAccent ? audioBus.clap * 0.13 : 0)
+        : 0;
+      beamMaterial.current.uniforms.opacity.value = THREE.MathUtils.damp(
+        beamMaterial.current.uniforms.opacity.value,
+        desiredOpacity,
+        desiredOpacity > beamMaterial.current.uniforms.opacity.value ? 18 : 9,
+        delta
+      );
+    }
   });
 
   return (
     <SpotLight
       ref={light}
-      castShadow
+      castShadow={fixture % 2 === 0}
       penumbra={0.82}
-      distance={10}
-      angle={0.29}
-      attenuation={5}
-      anglePower={6}
-      opacity={0.17}
+      distance={11.5}
+      angle={0.34}
+      attenuation={4.2}
+      anglePower={5.2}
+      opacity={0}
       shadow-bias={-0.00015}
       {...props}
     />
@@ -213,36 +274,65 @@ function ReadySignal({ onReady }) {
 }
 
 function SceneThree({
+  audioBus,
+  trackPath,
+  trackName,
+  shouldPlay,
+  showAudioStatus,
   introStarted,
   onAudioReady,
   onDancersReady,
   onSceneReady,
 }) {
-  const audioBus = useRef(createAudioBus()).current;
   const depthBuffer = useDepthBuffer({ frames: Infinity, size: 512 });
 
   return (
-    <Suspense fallback={null}>
+    <>
       <AudioVisualizer
-        path={wae}
+        path={trackPath}
         audioBus={audioBus}
         onReady={onAudioReady}
+        shouldPlay={shouldPlay}
+        showStatus={showAudioStatus}
       />
       <ClubArchitecture audioBus={audioBus} />
-      <TV position={[3.75, 1.25, -4.08]} rotation={[0, 0, 0]} scale={0.48} />
+      <Suspense fallback={null}>
+        <TV
+          position={[3.75, 1.25, -4.08]}
+          rotation={[0, 0, 0]}
+          scale={0.48}
+        />
+      </Suspense>
       <ClubSmoke audioBus={audioBus} />
       <Suspense fallback={null}>
         <DanceCrowd audioBus={audioBus} />
         <ReadySignal onReady={onDancersReady} />
       </Suspense>
 
-      <Experience audioBus={audioBus} introStarted={introStarted} />
+      <Suspense fallback={null}>
+        <Experience
+          audioBus={audioBus}
+          introStarted={introStarted}
+          trackName={trackName}
+        />
+      </Suspense>
       <mesh receiveShadow position={[0, -1, 0]} rotation-x={-Math.PI / 2}>
         <planeGeometry args={[50, 50]} />
-        <meshStandardMaterial
-          color="#0c0c12"
-          metalness={0.38}
-          roughness={0.44}
+        <MeshReflectorMaterial
+          color="#090910"
+          resolution={512}
+          mirror={0.22}
+          mixStrength={0.62}
+          mixContrast={1.08}
+          blur={[320, 96]}
+          mixBlur={1.15}
+          metalness={0.72}
+          roughness={0.56}
+          depthScale={0.32}
+          minDepthThreshold={0.32}
+          maxDepthThreshold={1.25}
+          depthToBlurRatioBias={0.38}
+          reflectorOffset={0.015}
         />
       </mesh>
       <DanceFloor audioBus={audioBus} />
@@ -263,7 +353,7 @@ function SceneThree({
       ))}
       <ReactivePostprocessing audioBus={audioBus} />
       <ReadySignal onReady={onSceneReady} />
-    </Suspense>
+    </>
   );
 }
 
@@ -289,21 +379,59 @@ function App() {
   const [sceneReady, setSceneReady] = useState(false);
   const [dancersReady, setDancersReady] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
-  const introStarted = sceneReady && dancersReady && audioReady;
+  const [musicPlaying, setMusicPlaying] = useState(() =>
+    new URLSearchParams(window.location.search).has("autostart")
+  );
+  const [track, setTrack] = useState(() => ({
+    path: wae,
+    name: "wae.mp3",
+  }));
+  const [audioInfo, setAudioInfo] = useState(null);
+  const { progress } = useProgress();
+  const audioBus = useRef(createAudioBus()).current;
+  const loadProgress = Math.round(Math.min(Math.max(progress, 0), 100));
+  const assetsReady =
+    sceneReady && dancersReady && audioReady && loadProgress >= 100;
+  const introStarted = isStarted && assetsReady;
+  const loadingLabel = assetsReady
+    ? "SCENE READY"
+    : loadProgress >= 100
+      ? "ANALYZING AUDIO"
+      : `LOADING SCENE · ${loadProgress}%`;
+  const trackStatus = !musicPlaying
+    ? "PAUSED · IDLE MODE"
+    : audioInfo?.error
+      ? "ANALYSIS FAILED"
+      : audioInfo?.bpm
+        ? `${audioInfo.bpm} BPM`
+        : audioInfo
+          ? "TEMPO UNAVAILABLE"
+          : "ANALYZING TEMPO";
 
   const handleSceneReady = useCallback(() => setSceneReady(true), []);
   const handleDancersReady = useCallback(() => setDancersReady(true), []);
-  const handleAudioReady = useCallback(() => setAudioReady(true), []);
+  const handleAudioReady = useCallback((analysis) => {
+    setAudioInfo(analysis || { error: true });
+    setAudioReady(true);
+  }, []);
+
+  const handleTrackUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setAudioInfo(null);
+    setMusicPlaying(true);
+    setTrack({ path: file, name: file.name });
+  }, []);
 
   const handleStart = () => {
-    setSceneReady(false);
-    setDancersReady(false);
-    setAudioReady(false);
+    setMusicPlaying(true);
     setStarted(true);
   };
 
-  return isStarted ? (
-    <div className="stage-shell">
+  return (
+    <div className={`stage-shell ${isStarted ? "" : "stage-shell--preview"}`}>
       <Canvas
         shadows
         dpr={[1, 1.5]}
@@ -314,31 +442,72 @@ function App() {
         <color attach="background" args={["#09090d"]} />
         <fog attach="fog" args={["#09090d", 6, 19]} />
         <SceneThree
+          audioBus={audioBus}
+          trackPath={track.path}
+          trackName={track.name}
+          shouldPlay={isStarted && musicPlaying}
+          showAudioStatus={isStarted}
           introStarted={introStarted}
           onAudioReady={handleAudioReady}
           onDancersReady={handleDancersReady}
           onSceneReady={handleSceneReady}
         />
       </Canvas>
-      <div
-        className={`scene-curtain ${
-          introStarted ? "scene-curtain--open" : ""
-        }`}
-      >
-        <div className="scene-curtain__beam" />
-        <p className="scene-curtain__label">ENTERING 8453</p>
-      </div>
+
+      {isStarted && (
+        <div className="music-dock">
+          <button
+            className="music-dock__transport"
+            type="button"
+            onClick={() => setMusicPlaying((playing) => !playing)}
+            aria-label={musicPlaying ? "Pause music" : "Play music"}
+            title={musicPlaying ? "Pause music" : "Play music"}
+          >
+            {musicPlaying ? "Ⅱ" : "▶"}
+          </button>
+          <div className="music-dock__track">
+            <span className="music-dock__name" title={track.name}>
+              {track.name}
+            </span>
+            <span className="music-dock__meta">{trackStatus}</span>
+          </div>
+          <label className="music-dock__upload">
+            LOAD TRACK
+            <input type="file" accept="audio/*" onChange={handleTrackUpload} />
+          </label>
+        </div>
+      )}
+
+      {isStarted && (
+        <div
+          className={`scene-curtain ${
+            introStarted ? "scene-curtain--open" : ""
+          }`}
+        >
+          <div className="scene-curtain__beam" />
+          <p className="scene-curtain__label">ENTERING 8453</p>
+        </div>
+      )}
+
+      <main className={`landing ${isStarted ? "landing--hidden" : ""}`}>
+        <div className="landing__noise" />
+        <p className="landing__eyebrow">8453 · AUDIO REACTIVE EXPERIENCE</p>
+        <h1 className="landing__title">FEEL THE KICK</h1>
+        <div className="landing__loader" aria-live="polite">
+          <div className="landing__loader-track">
+            <span
+              className="landing__loader-progress"
+              style={{ width: `${assetsReady ? 100 : loadProgress}%` }}
+            />
+          </div>
+          <span className="landing__loader-label">{loadingLabel}</span>
+        </div>
+        <button className="start_btn" onClick={handleStart}>
+          ENTER STAGE
+        </button>
+        <p className="landing__hint">sound on · drag to look around</p>
+      </main>
     </div>
-  ) : (
-    <main className="landing">
-      <div className="landing__noise" />
-      <p className="landing__eyebrow">8453 · AUDIO REACTIVE EXPERIENCE</p>
-      <h1 className="landing__title">FEEL THE KICK</h1>
-      <button className="start_btn" onClick={handleStart}>
-        ENTER STAGE
-      </button>
-      <p className="landing__hint">sound on · drag to look around</p>
-    </main>
   );
 }
 

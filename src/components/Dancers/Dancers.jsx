@@ -17,6 +17,8 @@ const animations = {
   hipHop: characterUrl("Hip Hop Dancing.fbx"),
   samba: characterUrl("Samba Dancing.fbx"),
   silly: characterUrl("Silly Dancing.fbx"),
+  idle: characterUrl("Idle.fbx"),
+  happyIdle: characterUrl("Happy Idle.fbx"),
 };
 
 const crowd = [
@@ -85,8 +87,6 @@ const crowd = [
   },
 ];
 
-export const DANCER_COLLIDERS = crowd.map(({ position }) => position);
-
 const makeInPlace = (sourceClip) => {
   const clip = sourceClip.clone();
 
@@ -107,10 +107,24 @@ const makeInPlace = (sourceClip) => {
   return clip;
 };
 
+const getBeatAlignedRate = (clipDuration, bpm, preferredRate) => {
+  if (!bpm || !clipDuration) return preferredRate;
+
+  const idealBeatCount = (clipDuration * bpm) / (60 * preferredRate);
+  const alignedBeatCount = Math.max(1, Math.floor(idealBeatCount * 2) / 2);
+  return (clipDuration * bpm) / (60 * alignedBeatCount);
+};
+
 function Dancer({ audioBus, dancer, index }) {
   const sourceModel = useLoader(FBXLoader, models[dancer.model]);
   const sourceAnimation = useLoader(FBXLoader, animations[dancer.animation]);
+  const sourceIdle = useLoader(FBXLoader, animations.idle);
+  const sourceHappyIdle = useLoader(FBXLoader, animations.happyIdle);
   const group = useRef(null);
+  const actions = useRef(null);
+  const activeMode = useRef(null);
+  const activeAction = useRef(null);
+  const idleVariant = useRef(Math.random() < 0.5 ? 0 : 1);
 
   const character = useMemo(() => {
     const cloned = cloneSkeleton(sourceModel);
@@ -144,38 +158,123 @@ function Dancer({ audioBus, dancer, index }) {
     return cloned;
   }, [dancer.tint, sourceModel]);
 
-  const clip = useMemo(
+  const danceClip = useMemo(
     () => makeInPlace(sourceAnimation.animations[0]),
     [sourceAnimation]
+  );
+  const idleClips = useMemo(
+    () => [
+      makeInPlace(sourceIdle.animations[0]),
+      makeInPlace(sourceHappyIdle.animations[0]),
+    ],
+    [sourceHappyIdle, sourceIdle]
   );
   const mixer = useMemo(() => new THREE.AnimationMixer(character), [character]);
 
   useEffect(() => {
-    const action = mixer.clipAction(clip);
-    action.reset();
-    action.setLoop(THREE.LoopRepeat, Infinity);
-    action.time = clip.duration * dancer.offset;
-    action.fadeIn(0.45);
-    action.play();
+    const danceAction = mixer.clipAction(danceClip);
+    const idleActions = idleClips.map((idleClip) => mixer.clipAction(idleClip));
+    const chosenIdleAction = idleActions[idleVariant.current];
+    const chosenIdleClip = idleClips[idleVariant.current];
+
+    [danceAction, ...idleActions].forEach((action) => {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.enabled = true;
+    });
+
+    const startsDancing = audioBus.isPlaying;
+    const initialAction = startsDancing ? danceAction : chosenIdleAction;
+    initialAction.reset();
+    initialAction.time = startsDancing
+      ? danceClip.duration * dancer.offset
+      : chosenIdleClip.duration * ((dancer.offset + index * 0.17) % 1);
+    initialAction.fadeIn(0.45);
+    initialAction.play();
+
+    actions.current = {
+      dance: danceAction,
+      danceClip,
+      idle: chosenIdleAction,
+      idleClip: chosenIdleClip,
+    };
+    activeMode.current = startsDancing ? "dance" : "idle";
+    activeAction.current = initialAction;
 
     return () => {
-      action.fadeOut(0.2);
-      action.stop();
+      actions.current = null;
+      activeAction.current = null;
+      activeMode.current = null;
       mixer.stopAllAction();
       mixer.uncacheRoot(character);
     };
-  }, [character, clip, dancer.offset, mixer]);
+  }, [
+    audioBus,
+    character,
+    danceClip,
+    dancer.offset,
+    idleClips,
+    index,
+    mixer,
+  ]);
 
   useFrame((state, delta) => {
-    mixer.timeScale = dancer.speed * (1 + audioBus.body * 0.035);
+    const dancerActions = actions.current;
+    if (!dancerActions) return;
+
+    const nextMode = audioBus.isPlaying ? "dance" : "idle";
+    const preferredDanceRate = dancer.speed * 1.12;
+    const danceRate = getBeatAlignedRate(
+      dancerActions.danceClip.duration,
+      audioBus.bpm,
+      preferredDanceRate
+    );
+
+    dancerActions.dance.setEffectiveTimeScale(
+      danceRate * (1 + audioBus.body * 0.018)
+    );
+    dancerActions.idle.setEffectiveTimeScale(0.88 + index * 0.018);
+
+    if (nextMode !== activeMode.current) {
+      const previousAction = activeAction.current;
+      const nextAction = dancerActions[nextMode];
+
+      nextAction.enabled = true;
+      nextAction.setEffectiveWeight(1);
+      nextAction.reset();
+      nextAction.time =
+        nextMode === "dance"
+          ? (audioBus.position * danceRate +
+              dancerActions.danceClip.duration * dancer.offset) %
+            dancerActions.danceClip.duration
+          : dancerActions.idleClip.duration *
+            ((dancer.offset + index * 0.17) % 1);
+      nextAction.play();
+
+      if (previousAction) {
+        nextAction.crossFadeFrom(previousAction, 0.55, false);
+      } else {
+        nextAction.fadeIn(0.55);
+      }
+
+      activeMode.current = nextMode;
+      activeAction.current = nextAction;
+    }
+
+    mixer.timeScale = 1;
     mixer.update(Math.min(delta, 0.1));
 
     if (group.current) {
       const breathingScale = 1 + audioBus.body * 0.007;
       group.current.scale.setScalar(breathingScale);
-      group.current.position.y =
-        dancer.position[1] +
-        Math.sin(state.clock.elapsedTime * 0.7 + index) * 0.008;
+      const danceFloat = audioBus.isPlaying
+        ? Math.sin(state.clock.elapsedTime * 0.7 + index) * 0.008
+        : 0;
+      group.current.position.y = THREE.MathUtils.damp(
+        group.current.position.y,
+        dancer.position[1] + danceFloat,
+        8,
+        delta
+      );
     }
   });
 
