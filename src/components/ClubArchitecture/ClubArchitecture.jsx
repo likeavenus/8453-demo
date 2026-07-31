@@ -119,6 +119,173 @@ const fixtureMounts = [
   [0, 5.1, -3.8],
 ];
 
+const spectrumVertexShader = /* glsl */ `
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const spectrumFragmentShader = /* glsl */ `
+  uniform vec3 uLowBands;
+  uniform vec2 uHighBands;
+  uniform vec3 uHits;
+  uniform float uTime;
+  uniform float uPlaying;
+  uniform float uMirror;
+  uniform float uIntensity;
+
+  varying vec2 vUv;
+
+  float readSpectrum(float x) {
+    if (x < 0.25) return mix(uLowBands.x, uLowBands.y, x * 4.0);
+    if (x < 0.5) return mix(uLowBands.y, uLowBands.z, (x - 0.25) * 4.0);
+    if (x < 0.75) return mix(uLowBands.z, uHighBands.x, (x - 0.5) * 4.0);
+    return mix(uHighBands.x, uHighBands.y, (x - 0.75) * 4.0);
+  }
+
+  void main() {
+    float spectrumX = mix(vUv.x, 1.0 - vUv.x, uMirror);
+    float columns = 32.0;
+    float column = floor(spectrumX * columns);
+    float localX = fract(spectrumX * columns);
+    float barMask =
+      smoothstep(0.1, 0.22, localX) *
+      (1.0 - smoothstep(0.78, 0.9, localX));
+
+    float spectrum = readSpectrum(spectrumX);
+    float hit =
+      uHits.x * (1.0 - spectrumX) * 0.2 +
+      uHits.y * (1.0 - abs(spectrumX - 0.55) * 1.8) * 0.13 +
+      uHits.z * spectrumX * 0.2;
+    float motion =
+      sin(column * 1.73 + uTime * 3.1) * 0.024 +
+      sin(column * 0.43 - uTime * 1.65) * 0.018;
+    float activeHeight = clamp(0.08 + spectrum * 0.72 + hit + motion, 0.06, 0.93);
+    float height = mix(0.055, activeHeight, uPlaying);
+
+    float fill = smoothstep(height + 0.012, height - 0.012, vUv.y);
+    float cellY = fract(vUv.y * 13.0);
+    float segmentMask =
+      smoothstep(0.08, 0.18, cellY) *
+      (1.0 - smoothstep(0.78, 0.92, cellY));
+    float peak = exp(-abs(vUv.y - height) * 72.0) * barMask;
+
+    vec3 cyan = vec3(0.08, 0.72, 1.0);
+    vec3 violet = vec3(0.52, 0.22, 1.0);
+    vec3 magenta = vec3(1.0, 0.12, 0.48);
+    vec3 color = mix(cyan, violet, smoothstep(0.18, 0.58, spectrumX));
+    color = mix(color, magenta, smoothstep(0.62, 1.0, spectrumX));
+    color = mix(color, vec3(0.94, 0.98, 1.0), peak * 0.55);
+
+    float gridX = 1.0 - smoothstep(0.0, 0.035, abs(fract(vUv.x * 8.0) - 0.5));
+    float gridY = 1.0 - smoothstep(0.0, 0.045, abs(fract(vUv.y * 5.0) - 0.5));
+    float grid = max(gridX, gridY) * 0.035;
+    float edgeFade =
+      smoothstep(0.0, 0.035, vUv.x) *
+      (1.0 - smoothstep(0.965, 1.0, vUv.x)) *
+      smoothstep(0.0, 0.06, vUv.y) *
+      (1.0 - smoothstep(0.94, 1.0, vUv.y));
+    float alpha =
+      (fill * barMask * segmentMask * 0.72 + peak * 0.7 + grid) *
+      edgeFade *
+      uIntensity;
+
+    gl_FragColor = vec4(color * (0.76 + peak * 0.72), alpha);
+  }
+`;
+
+function WallSpectrumPanel({ audioBus, lowPower, side }) {
+  const displayTime = useRef(0);
+  const uniforms = useMemo(
+    () => ({
+      uLowBands: { value: new THREE.Vector3() },
+      uHighBands: { value: new THREE.Vector2() },
+      uHits: { value: new THREE.Vector3() },
+      uTime: { value: 0 },
+      uPlaying: { value: 0 },
+      uMirror: { value: side > 0 ? 1 : 0 },
+      uIntensity: { value: lowPower ? 0.68 : 0.86 },
+    }),
+    [lowPower, side]
+  );
+  const accent = side < 0 ? "#27c9ff" : "#ff357d";
+
+  useFrame((_, delta) => {
+    if (audioBus.isPlaying) displayTime.current += delta;
+
+    uniforms.uTime.value = displayTime.current;
+    uniforms.uLowBands.value.set(audioBus.sub, audioBus.bass, audioBus.lowMid);
+    uniforms.uHighBands.value.set(audioBus.presence, audioBus.high);
+    uniforms.uHits.value.set(
+      audioBus.kick,
+      audioBus.clap,
+      Math.max(audioBus.hat, audioBus.highFlux)
+    );
+    uniforms.uPlaying.value = THREE.MathUtils.damp(
+      uniforms.uPlaying.value,
+      audioBus.isPlaying ? 1 : 0,
+      audioBus.isPlaying ? 10 : 5,
+      delta
+    );
+  });
+
+  return (
+    <group
+      position={[side * 5.49, 2.3, -0.35]}
+      rotation-y={side < 0 ? Math.PI / 2 : -Math.PI / 2}
+    >
+      <mesh>
+        <boxGeometry args={[4.48, 0.94, 0.12]} />
+        <meshStandardMaterial
+          color="#0d0e15"
+          metalness={0.86}
+          roughness={0.27}
+        />
+      </mesh>
+      <mesh position={[0, 0, 0.066]}>
+        <planeGeometry args={[4.18, 0.7]} />
+        <meshBasicMaterial color="#02040a" />
+      </mesh>
+      <mesh position={[0, 0, 0.071]} renderOrder={3}>
+        <planeGeometry args={[4.12, 0.66]} />
+        <shaderMaterial
+          uniforms={uniforms}
+          vertexShader={spectrumVertexShader}
+          fragmentShader={spectrumFragmentShader}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          toneMapped={false}
+        />
+      </mesh>
+
+      {[-1, 1].map((edge) => (
+        <mesh key={`spectrum-edge-${edge}`} position={[edge * 2.18, 0, 0.075]}>
+          <boxGeometry args={[0.045, 0.82, 0.05]} />
+          <meshStandardMaterial
+            color={accent}
+            emissive={accent}
+            emissiveIntensity={0.16}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+      {[-1.86, 0, 1.86].map((x, index) => (
+        <mesh key={`spectrum-status-${x}`} position={[x, -0.405, 0.081]}>
+          <circleGeometry args={[index === 1 ? 0.035 : 0.024, 16]} />
+          <meshBasicMaterial
+            color={index === 1 ? "#eefaff" : accent}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 export function ClubArchitecture({ audioBus, lowPower = false }) {
   const wallGeometry = useMemo(createClubWall, []);
   const speakerGeometry = useMemo(createSpeakerCabinet, []);
@@ -701,6 +868,9 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
           </mesh>
         </group>
       ))}
+
+      <WallSpectrumPanel audioBus={audioBus} lowPower={lowPower} side={-1} />
+      <WallSpectrumPanel audioBus={audioBus} lowPower={lowPower} side={1} />
 
       {[-1, 1].map((side, sideIndex) => (
         <group key={`side-wall-${side}`}>
