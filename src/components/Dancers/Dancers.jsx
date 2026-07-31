@@ -249,18 +249,33 @@ function Dancer({ audioBus, dancer, index }) {
     if (!dancerActions) return;
 
     const nextMode = audioBus.isPlaying ? "dance" : "idle";
-    const bpmRatio = THREE.MathUtils.clamp((audioBus.bpm || 120) / 120, 0.72, 1.4);
-    const tempoResponse = Math.pow(bpmRatio, 0.62);
-    const preferredDanceRate = dancer.speed * 1.1 * tempoResponse;
+    const bpmRatio = THREE.MathUtils.clamp((audioBus.bpm || 110) / 100, 0.72, 1.55);
+    const tempoResponse = Math.pow(bpmRatio, 0.72);
+    const preferredDanceRate = dancer.speed * 1.18 * tempoResponse;
     const danceRate = getBeatAlignedRate(
       dancerActions.danceClip.duration,
       audioBus.bpm,
       preferredDanceRate
     );
-    const musicalAccent = audioBus.isPlaying
-      ? audioBus.kick * 0.2 + audioBus.clap * 0.075 + audioBus.body * 0.055
+    const sustainedEnergy =
+      (audioBus.bass +
+        audioBus.lowMid +
+        audioBus.presence +
+        audioBus.high) /
+      4;
+    const trackDrive = audioBus.isPlaying
+      ? sustainedEnergy * 0.16 + audioBus.body * 0.08
       : 0;
-    const targetDanceRate = danceRate * (1 + musicalAccent);
+    const percussionDrive = audioBus.isPlaying
+      ? audioBus.kick * 0.16 +
+        audioBus.clap * 0.075 +
+        audioBus.hat * 0.045
+      : 0;
+    const targetDanceRate = THREE.MathUtils.clamp(
+      danceRate * (1 + trackDrive + percussionDrive),
+      0.82,
+      1.85
+    );
 
     smoothedDanceRate.current = THREE.MathUtils.damp(
       smoothedDanceRate.current,
