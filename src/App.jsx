@@ -338,12 +338,36 @@ function DanceFloor({ audioBus, lowPower = false }) {
   });
 
   return (
-    <group rotation-x={-Math.PI / 2} position={[0, -0.978, 0]}>
+    <group position={[0, -0.978, 0]}>
+      <mesh position-y={-0.01} receiveShadow={!lowPower}>
+        <cylinderGeometry args={[3.55, 3.55, 0.035, lowPower ? 48 : 72]} />
+        <meshStandardMaterial
+          color="#0c0d15"
+          metalness={0.76}
+          roughness={0.38}
+        />
+      </mesh>
+      {[0, 1, 2, 3, 4, 5].map((index) => (
+        <mesh
+          key={`floor-spoke-${index}`}
+          position={[0, 0.014, 0]}
+          rotation-y={(index * Math.PI) / 6}
+        >
+          <boxGeometry args={[0.028, 0.012, 6.35]} />
+          <meshStandardMaterial
+            color={index % 2 === 0 ? "#113d52" : "#4b1739"}
+            emissive={index % 2 === 0 ? "#0ba6e8" : "#f01d7e"}
+            emissiveIntensity={0.28}
+            metalness={0.5}
+            roughness={0.42}
+          />
+        </mesh>
+      ))}
       {[0, 1, 2, 3, 4].map((index) => {
-        const innerRadius = 0.9 + index * 0.72;
+        const innerRadius = 0.85 + index * 0.62;
 
         return (
-          <mesh key={innerRadius}>
+          <mesh key={innerRadius} rotation-x={-Math.PI / 2} position-y={0.022}>
             <ringGeometry
               args={[innerRadius, innerRadius + 0.055, lowPower ? 64 : 96]}
             />
@@ -360,6 +384,46 @@ function DanceFloor({ audioBus, lowPower = false }) {
           </mesh>
         );
       })}
+    </group>
+  );
+}
+
+function RotatingDanceStage({ audioBus, lowPower, onDancersReady }) {
+  const stage = useRef(null);
+  const angularSpeed = useRef(0);
+
+  useFrame((_, delta) => {
+    if (!stage.current) return;
+
+    const sustainedEnergy =
+      audioBus.sub * 0.16 +
+      audioBus.bass * 0.25 +
+      audioBus.lowMid * 0.2 +
+      audioBus.presence * 0.17 +
+      audioBus.high * 0.08 +
+      audioBus.body * 0.14;
+    const audibleDrive =
+      THREE.MathUtils.smoothstep(sustainedEnergy, 0.055, 0.48) *
+      THREE.MathUtils.smoothstep(audioBus.loudness || 0, 0.035, 0.22);
+    const targetSpeed =
+      audioBus.isPlaying && audibleDrive > 0.02
+        ? 0.01 + audibleDrive * 0.026
+        : 0;
+
+    angularSpeed.current = THREE.MathUtils.damp(
+      angularSpeed.current,
+      targetSpeed,
+      targetSpeed > angularSpeed.current ? 0.75 : 1.8,
+      delta
+    );
+    stage.current.rotation.y += angularSpeed.current * Math.min(delta, 0.1);
+  });
+
+  return (
+    <group ref={stage}>
+      <DanceCrowd audioBus={audioBus} lowPower={lowPower} />
+      <DanceFloor audioBus={audioBus} lowPower={lowPower} />
+      <ReadySignal onReady={onDancersReady} />
     </group>
   );
 }
@@ -464,21 +528,25 @@ function SceneThree({
           lowPower={lowPower}
         />
       </Suspense>
-      <ClubSmoke audioBus={audioBus} lowPower={lowPower} />
-      <Suspense fallback={null}>
-        <DanceCrowd audioBus={audioBus} lowPower={lowPower} />
-        <ReadySignal onReady={onDancersReady} />
-      </Suspense>
+      <group position={[0, 0, 0.8]}>
+        <ClubSmoke audioBus={audioBus} lowPower={lowPower} />
+        <Suspense fallback={null}>
+          <RotatingDanceStage
+            audioBus={audioBus}
+            lowPower={lowPower}
+            onDancersReady={onDancersReady}
+          />
+        </Suspense>
 
-      <Suspense fallback={null}>
-        <Experience
-          audioBus={audioBus}
-          introStarted={introStarted}
-          trackName={trackName}
-        />
-      </Suspense>
+        <Suspense fallback={null}>
+          <Experience
+            audioBus={audioBus}
+            introStarted={introStarted}
+            trackName={trackName}
+          />
+        </Suspense>
+      </group>
       <ClubFloor lowPower={lowPower} />
-      <DanceFloor audioBus={audioBus} lowPower={lowPower} />
 
       <ambientLight intensity={0.035} />
       <ClubWash audioBus={audioBus} />
@@ -509,7 +577,7 @@ function Controls() {
       autoRotateSpeed={0.24}
       enableDamping
       dampingFactor={0.055}
-      target={[0, 0.75, 0]}
+      target={[0, 0.75, 0.35]}
       args={[camera, gl.domElement]}
     />
   );
@@ -702,6 +770,7 @@ function App() {
   const handleTempoToggle = () => {
     if (!nextTempo) return;
     audioBus.bpm = nextTempo;
+    audioBus.visualBpm = nextTempo;
     setTempoBpm(nextTempo);
   };
 

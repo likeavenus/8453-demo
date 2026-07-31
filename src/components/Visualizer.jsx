@@ -71,6 +71,10 @@ export const createAudioBus = () => ({
   clapHitCount: 0,
   hatHitCount: 0,
   bpm: null,
+  visualBpm: null,
+  beatOffset: 0,
+  visualBeatOffset: 0,
+  loudness: 0,
   onsetCount: 0,
   kickCount: 0,
   clapCount: 0,
@@ -89,6 +93,7 @@ class MusicReactiveEngine {
     this.previousFrequencyData = new Uint8Array(
       this.analyser.analyser.frequencyBinCount
     );
+    this.timeDomainData = new Float32Array(this.analyser.analyser.fftSize);
     this.bandCalibration = new Map();
     this.skipFluxFrame = true;
     this.analysis = null;
@@ -102,6 +107,10 @@ class MusicReactiveEngine {
     this.audioBus.status = "analyzing";
     this.audioBus.isPlaying = false;
     this.audioBus.bpm = null;
+    this.audioBus.visualBpm = null;
+    this.audioBus.beatOffset = 0;
+    this.audioBus.visualBeatOffset = 0;
+    this.audioBus.loudness = 0;
     this.audioBus.position = 0;
     this.audioBus.duration = 0;
     this.audioBus.onsetCount = 0;
@@ -135,7 +144,11 @@ class MusicReactiveEngine {
     if (this.disposed) return null;
 
     this.analysis = analysis;
-    this.audioBus.bpm = analysis.bpm;
+    this.audioBus.bpm = analysis.musicalBpm || analysis.bpm;
+    this.audioBus.visualBpm = analysis.visualBpm || this.audioBus.bpm;
+    this.audioBus.beatOffset = analysis.beatOffset || 0;
+    this.audioBus.visualBeatOffset =
+      analysis.visualBeatOffset ?? this.audioBus.beatOffset;
     this.audioBus.onsetCount = analysis.onsets.length;
     this.audioBus.kickCount = analysis.kickCount;
     this.audioBus.clapCount = analysis.clapCount;
@@ -230,7 +243,11 @@ class MusicReactiveEngine {
     this.audioBus.clapHitCount = clapHits;
     this.audioBus.hatHitCount = hatHits;
     this.audioBus.beatCount = this.audioBus.bpm
-      ? Math.floor((nextPosition * this.audioBus.bpm) / 60)
+      ? Math.floor(
+          (Math.max(0, nextPosition - this.audioBus.beatOffset) *
+            this.audioBus.bpm) /
+            60
+        )
       : 0;
     this.audioBus.seekVersion += 1;
     this.skipFluxFrame = true;
@@ -310,6 +327,13 @@ class MusicReactiveEngine {
   }
 
   settle(delta) {
+    this.audioBus.loudness = follow(
+      this.audioBus.loudness,
+      0,
+      delta,
+      0.04,
+      0.28
+    );
     this.audioBus.sub = follow(this.audioBus.sub, 0, delta, 0.04, 0.22);
     this.audioBus.bass = follow(this.audioBus.bass, 0, delta, 0.04, 0.18);
     this.audioBus.lowMid = follow(
@@ -422,6 +446,22 @@ class MusicReactiveEngine {
     }
 
     const data = this.analyser.getFrequencyData();
+    this.analyser.analyser.getFloatTimeDomainData(this.timeDomainData);
+    let timeSquares = 0;
+    for (let index = 0; index < this.timeDomainData.length; index += 1) {
+      const sample = this.timeDomainData[index];
+      timeSquares += sample * sample;
+    }
+    const rms = Math.sqrt(timeSquares / this.timeDomainData.length);
+    const loudnessDb = 20 * Math.log10(Math.max(rms, 0.000001));
+    const loudnessTarget = clamp01((loudnessDb + 58) / 40);
+    this.audioBus.loudness = follow(
+      this.audioBus.loudness,
+      loudnessTarget,
+      delta,
+      0.07,
+      0.38
+    );
     const features = {
       sub: this.readBandFeatures(data, 25, 80),
       bass: this.readBandFeatures(data, 80, 200),
