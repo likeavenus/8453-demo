@@ -604,55 +604,6 @@ function TrackTimeline({ audioBus }) {
   );
 }
 
-const bandRoutes = [
-  { key: "sub", label: "SUB", target: "sphere + floor", color: "#a951ff" },
-  { key: "bass", label: "BASS", target: "speaker cones", color: "#27c9ff" },
-  { key: "lowMid", label: "MID", target: "side racks", color: "#ff357d" },
-  { key: "presence", label: "PRES", target: "wall reactors", color: "#b36bff" },
-  { key: "high", label: "HIGH", target: "spotlights", color: "#f3f6ff" },
-];
-
-function BandRoutingMonitor({ audioBus }) {
-  const [levels, setLevels] = useState(() => bandRoutes.map(() => 0));
-
-  useEffect(() => {
-    const updateLevels = () => {
-      setLevels(
-        bandRoutes.map(({ key }) => {
-          const flux = audioBus[`${key}Flux`] || 0;
-          const transient = key === "high" ? audioBus.hat || 0 : 0;
-          return Math.min(1, Math.max(audioBus[key] || 0, flux, transient));
-        })
-      );
-    };
-
-    updateLevels();
-    const interval = window.setInterval(updateLevels, 90);
-    return () => window.clearInterval(interval);
-  }, [audioBus]);
-
-  return (
-    <div className="music-dock__bands" aria-label="Frequency routing monitor">
-      {bandRoutes.map(({ key, label, target, color }, index) => (
-        <div
-          key={key}
-          className="music-dock__band"
-          title={`${label} → ${target}`}
-          style={{ "--band-color": color }}
-        >
-          <span className="music-dock__band-label">{label}</span>
-          <span className="music-dock__band-track">
-            <span
-              className="music-dock__band-level"
-              style={{ transform: `scaleX(${levels[index]})` }}
-            />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function App() {
   const [renderProfile] = useState(() => {
     const compactViewport = window.matchMedia("(max-width: 820px)").matches;
@@ -817,7 +768,6 @@ function App() {
             <input type="file" accept="audio/*" onChange={handleTrackUpload} />
           </label>
           <TrackTimeline audioBus={audioBus} />
-          <BandRoutingMonitor audioBus={audioBus} />
         </div>
       )}
 

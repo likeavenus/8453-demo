@@ -211,8 +211,8 @@ button {
   outline: none;
   background: linear-gradient(
     90deg,
-    #28caff 0%,
-    #a951ff var(--seek-progress),
+    #d9f8ff 0%,
+    #55cfff var(--seek-progress),
     rgba(255, 255, 255, 0.13) var(--seek-progress),
     rgba(255, 255, 255, 0.13) 100%
   );
@@ -233,10 +233,10 @@ button {
   appearance: none;
   border: 2px solid #f8f4ff;
   border-radius: 50%;
-  background: #9d4dff;
+  background: #68d7ff;
   box-shadow:
-    0 0 0 3px rgba(157, 77, 255, 0.16),
-    0 0 14px rgba(91, 203, 255, 0.58);
+    0 0 0 3px rgba(104, 215, 255, 0.14),
+    0 0 12px rgba(85, 207, 255, 0.52);
 }
 
 .music-dock__seek::-moz-range-track {
@@ -250,60 +250,19 @@ button {
   height: 10px;
   border: 2px solid #f8f4ff;
   border-radius: 50%;
-  background: #9d4dff;
+  background: #68d7ff;
   box-shadow:
-    0 0 0 3px rgba(157, 77, 255, 0.16),
-    0 0 14px rgba(91, 203, 255, 0.58);
+    0 0 0 3px rgba(104, 215, 255, 0.14),
+    0 0 12px rgba(85, 207, 255, 0.52);
 }
 
 .music-dock__seek:focus-visible {
-  box-shadow: 0 0 0 2px rgba(205, 154, 255, 0.72);
+  box-shadow: 0 0 0 2px rgba(104, 215, 255, 0.72);
 }
 
 .music-dock__seek:disabled {
   cursor: wait;
   opacity: 0.34;
-}
-
-.music-dock__bands {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 7px;
-  padding: 0 3px 2px;
-}
-
-.music-dock__band {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.music-dock__band-label {
-  overflow: hidden;
-  color: rgba(227, 216, 240, 0.48);
-  font-size: 6px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-overflow: ellipsis;
-}
-
-.music-dock__band-track {
-  height: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.09);
-}
-
-.music-dock__band-level {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--band-color);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--band-color) 58%, transparent);
-  transform-origin: left center;
-  transition: transform 70ms linear;
 }
 
 .creator-links {

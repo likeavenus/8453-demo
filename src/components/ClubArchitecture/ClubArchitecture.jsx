@@ -96,9 +96,8 @@ const createRotor = () => {
 
 const bars = Array.from({ length: 8 }, (_, index) => index);
 const stageSegments = Array.from({ length: 12 }, (_, index) => index);
-const djMeterSegments = Array.from({ length: 15 }, (_, index) => index);
 const djPadSegments = Array.from({ length: 8 }, (_, index) => index);
-const djBandColors = ["#9d55ff", "#27c9ff", "#ff357d", "#ba70ff", "#f4f7ff"];
+const djControlColors = ["#27c9ff", "#8d70ff", "#f4f7ff", "#ff5a92"];
 const speakerDrivers = [
   { y: 0.72, radius: 0.435 },
   { y: -0.31, radius: 0.325 },
@@ -136,7 +135,6 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
   const ventLights = useRef([]);
   const sideRotors = useRef([]);
   const stageMeters = useRef([]);
-  const djMeters = useRef([]);
   const djPlatters = useRef([]);
   const djDeckRings = useRef([]);
   const djPadMaterials = useRef([]);
@@ -275,37 +273,6 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
       );
       meter.material.emissiveIntensity =
         0.08 + band * 0.42 + chase * audioBus.beat * 0.55;
-    });
-
-    djMeters.current.forEach((meter, index) => {
-      if (!meter) return;
-
-      const bandIndex = index % 5;
-      const band =
-        bandIndex === 0
-          ? audioBus.sub
-          : bandIndex === 1
-            ? audioBus.bass
-            : bandIndex === 2
-              ? audioBus.lowMid
-              : bandIndex === 3
-                ? audioBus.presence
-                : audioBus.high;
-      const transient =
-        bandIndex < 2
-          ? audioBus.kick
-          : bandIndex === 4
-            ? Math.max(audioBus.highFlux, audioBus.hat)
-            : audioBus.presenceFlux;
-      const targetScale = 0.16 + band * 0.82 + transient * 0.24;
-
-      meter.scale.y = THREE.MathUtils.damp(
-        meter.scale.y,
-        targetScale,
-        targetScale > meter.scale.y ? 18 : 8,
-        delta
-      );
-      meter.material.emissiveIntensity = 0.1 + band * 0.58 + transient * 0.4;
     });
 
     djPlatters.current.forEach((platter, index) => {
@@ -471,34 +438,6 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
           />
         </mesh>
 
-        {(lowPower
-          ? djMeterSegments.filter((index) => index % 2 === 0)
-          : djMeterSegments
-        ).map((index) => {
-          const color = djBandColors[index % djBandColors.length];
-
-          return (
-            <mesh
-              key={`dj-meter-${index}`}
-              ref={(mesh) => {
-                djMeters.current[index] = mesh;
-              }}
-              position={[-1.64 + index * 0.234, 0.58, 0.465]}
-              scale-y={0.16}
-            >
-              <boxGeometry args={[0.135, 0.48, 0.024]} />
-              <meshStandardMaterial
-                color={color}
-                emissive={color}
-                emissiveIntensity={0.1}
-                metalness={0.32}
-                roughness={0.28}
-                toneMapped={false}
-              />
-            </mesh>
-          );
-        })}
-
         <mesh position={[0, 1.14, 0.02]} castShadow={!lowPower} receiveShadow>
           <boxGeometry args={[4.72, 0.1, 1.08]} />
           <meshStandardMaterial
@@ -587,8 +526,8 @@ export function ClubArchitecture({ audioBus, lowPower = false }) {
                 <mesh position={[0, 0, 0.23]}>
                   <boxGeometry args={[0.035, 0.026, 0.18]} />
                   <meshStandardMaterial
-                    color={djBandColors[index % djBandColors.length]}
-                    emissive={djBandColors[index % djBandColors.length]}
+                    color={djControlColors[index % djControlColors.length]}
+                    emissive={djControlColors[index % djControlColors.length]}
                     emissiveIntensity={0.08}
                     toneMapped={false}
                   />
